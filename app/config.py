@@ -60,6 +60,7 @@ class Settings:
 
         # 5. File upload limits & settings
         self.CHUNK_SIZE = 1024 * 1024  # 1MB buffer for streaming uploads
+        self.UPLOAD_CHUNK_BYTES = 8 * 1024**2
         self.MAX_UPLOAD_BYTES = _positive_int_env("KAGGLE_DRIVE_MAX_UPLOAD_BYTES", 5 * 1024**3)
         self.MAX_BINARY_SAVE_BYTES = _positive_int_env("KAGGLE_DRIVE_MAX_BINARY_SAVE_BYTES", 100 * 1024**2)
         self.MAX_REMOTE_DOWNLOAD_BYTES = _positive_int_env("KAGGLE_DRIVE_MAX_REMOTE_DOWNLOAD_BYTES", 5 * 1024**3)

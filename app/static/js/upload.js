@@ -86,6 +86,10 @@ const Uploader = {
     if (progressText) progressText.textContent = "0%";
     if (fileListText) fileListText.textContent = t("upload_preparing", { count: files.length });
 
+    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > 80 * 1024 * 1024) {
+      return this.uploadFilesInChunks(files, totalBytes, progressBar, progressText);
+    }
     const formData = new FormData();
     formData.append("target_path", AppState.currentPath);
 
@@ -136,6 +140,80 @@ const Uploader = {
 
       xhr.send(formData);
     });
+  },
+
+  async uploadFilesInChunks(files, totalBytes, progressBar, progressText) {
+    const chunkSize = 8 * 1024 * 1024;
+    let completedBytes = 0;
+
+    try {
+      for (const file of files) {
+        const uploadId = (window.crypto && typeof window.crypto.randomUUID === "function")
+          ? window.crypto.randomUUID()
+          : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+              const random = Math.random() * 16 | 0;
+              return (char === "x" ? random : (random & 3 | 8)).toString(16);
+            });
+        const chunkCount = Math.max(1, Math.ceil(file.size / chunkSize));
+        let offset = 0;
+
+        for (let index = 0; index < chunkCount; index++) {
+          const end = Math.min(offset + chunkSize, file.size);
+          const blob = file.slice(offset, end);
+          const formData = new FormData();
+          formData.append("target_path", AppState.currentPath);
+          formData.append("relative_path", file.webkitRelativePath || file.name);
+          formData.append("upload_id", uploadId);
+          formData.append("offset", String(offset));
+          formData.append("total_size", String(file.size));
+          formData.append("batch_size", String(totalBytes));
+          formData.append("chunk", blob, "chunk.bin");
+
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/api/files/upload/chunk", true);
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable && progressBar && progressText) {
+                const inFlight = Math.min(blob.size, event.loaded);
+                const percent = Math.round(((completedBytes + inFlight) / totalBytes) * 100);
+                progressBar.style.width = percent + "%";
+                progressText.textContent = percent + "% (" +
+                  UI.formatSize(completedBytes + inFlight) + " / " + UI.formatSize(totalBytes) + ")";
+              }
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+                return;
+              }
+              let errorMsg = "Upload failed (HTTP " + xhr.status + ").";
+              try {
+                const response = JSON.parse(xhr.responseText);
+                errorMsg = response.detail || errorMsg;
+              } catch (_) {}
+              reject(new Error(errorMsg));
+            };
+            xhr.onerror = () => reject(new Error(t("upload_error")));
+            xhr.send(formData);
+          });
+
+          completedBytes += blob.size;
+          offset = end;
+        }
+      }
+
+      this.isUploading = false;
+      setTimeout(() => UI.closeModal("uploadModal"), 600);
+      UI.toast(t("upload_success", { count: files.length }), "success");
+      App.loadDirectory(AppState.currentPath);
+      App.refreshSystemStats();
+    } catch (error) {
+      this.isUploading = false;
+      UI.closeModal("uploadModal");
+      const errorMsg = error && error.message ? error.message : t("upload_error");
+      UI.toast(errorMsg, "error");
+      throw error;
+    }
   }
 };
 
