@@ -22,8 +22,8 @@ class Settings:
         env_root = os.getenv("KAGGLE_DRIVE_ROOT")
         if env_root:
             self.ROOT_DIR = Path(env_root).resolve()
-        elif Path("/").exists():
-            self.ROOT_DIR = Path("/").resolve()
+        elif Path("/workspace").exists():
+            self.ROOT_DIR = Path("/workspace").resolve()
         else:
             # Local fallback for development / testing
             local_workspace = Path("./workspace").resolve()
