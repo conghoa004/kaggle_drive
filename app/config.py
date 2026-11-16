@@ -20,16 +20,8 @@ class Settings:
     def __init__(self):
         # 1. Root Directory Detection
         env_root = os.getenv("KAGGLE_DRIVE_ROOT")
-        if env_root:
-            self.ROOT_DIR = Path(env_root).resolve()
-        elif Path("/workspace").exists():
-            self.ROOT_DIR = Path("/workspace").resolve()
-        else:
-            # Local fallback for development / testing
-            local_workspace = Path("./workspace").resolve()
-            local_workspace.mkdir(parents=True, exist_ok=True)
-            self.ROOT_DIR = local_workspace
-
+        self.ROOT_DIR = Path(env_root or "/workspace").resolve()
+        
         # Ensure ROOT_DIR exists
         self.ROOT_DIR.mkdir(parents=True, exist_ok=True)
 
