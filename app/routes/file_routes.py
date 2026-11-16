@@ -212,6 +212,83 @@ def upload_files(
     }
 
 
+@router.post("/upload/chunk")
+def upload_file_chunk(
+    request: Request,
+    target_path: str = Form(""),
+    relative_path: str = Form(...),
+    upload_id: str = Form(...),
+    offset: int = Form(...),
+    total_size: int = Form(...),
+    batch_size: int = Form(...),
+    chunk: UploadFile = File(...),
+):
+    """Append one bounded upload chunk and atomically publish the completed file."""
+    require_auth(request)
+    from uuid import UUID
+
+    try:
+        UUID(upload_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid upload ID.")
+
+    if total_size < 0 or total_size > settings.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Upload exceeds the configured size limit.")
+    if batch_size < total_size or batch_size > settings.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Upload exceeds the configured size limit.")
+    if offset < 0 or offset > total_size:
+        raise HTTPException(status_code=400, detail="Invalid upload offset.")
+
+    base_folder = get_safe_path(target_path, must_exist=True)
+    if not base_folder.is_dir():
+        raise HTTPException(status_code=400, detail="Upload destination must be a directory.")
+
+    raw_name = relative_path.replace("\\", "/")
+    parts = [part for part in raw_name.split("/") if part not in ("", ".")]
+    if raw_name.startswith("/") or not parts or any(part == ".." or ":" in part for part in parts):
+        raise HTTPException(status_code=400, detail="Invalid upload filename.")
+
+    dest_path = base_folder.joinpath(*parts).resolve()
+    try:
+        dest_path.relative_to(base_folder.resolve())
+        dest_path.relative_to(settings.ROOT_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Upload destination escapes the configured root.")
+
+    try:
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        chunk_path = dest_path.with_name(f".upload-{upload_id}.part")
+        data = chunk.file.read(settings.UPLOAD_CHUNK_BYTES + 1)
+        if len(data) > settings.UPLOAD_CHUNK_BYTES or offset + len(data) > total_size:
+            raise HTTPException(status_code=413, detail="Upload chunk exceeds the configured limit.")
+
+        if offset == 0:
+            if chunk_path.is_dir():
+                raise HTTPException(status_code=400, detail="Invalid upload staging path.")
+            mode = "wb"
+        else:
+            if not chunk_path.is_file() or chunk_path.stat().st_size != offset:
+                raise HTTPException(status_code=409, detail="Upload chunk is out of sequence.")
+            mode = "ab"
+
+        with chunk_path.open(mode) as output:
+            output.write(data)
+
+        received = offset + len(data)
+        if received == total_size:
+            chunk_path.replace(dest_path)
+            return {
+                "status": "success",
+                "filename": dest_path.name,
+                "path": str(dest_path.relative_to(settings.ROOT_DIR.resolve())).replace("\\", "/"),
+                "size": received,
+            }
+        return {"status": "partial", "received": received}
+    finally:
+        chunk.file.close()
+
+
+
 @router.post("/mkdir")
 def create_directory(request: Request, payload: MkdirRequest):
     """Create a new folder."""

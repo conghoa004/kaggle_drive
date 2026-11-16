@@ -33,6 +33,7 @@ class RequestBodyLimitMiddleware:
         limits = {
             "/api/auth/login": 16 * 1024,
             "/api/files/upload": settings.MAX_UPLOAD_BYTES + 16 * 1024 * 1024,
+            "/api/files/upload/chunk": settings.UPLOAD_CHUNK_BYTES + 1024 * 1024,
             "/api/files/content": settings.MAX_TEXT_PREVIEW_SIZE * 6 + 1024 * 1024,
             "/api/files/save-binary": ((settings.MAX_BINARY_SAVE_BYTES + 2) // 3) * 4 + 1024 * 1024,
             "/api/files/download-selected-zip": 8 * 1024 * 1024,
