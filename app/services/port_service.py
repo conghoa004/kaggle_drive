@@ -173,7 +173,7 @@ class PortManager:
 
             tunnel = CloudflareTunnelService()
             try:
-                url = tunnel.start_tunnel(port, quick=True)
+                url = tunnel.start_tunnel(port, quick=True, verify_public_health=False)
                 if not tunnel.process or tunnel.process.poll() is not None:
                     raise RuntimeError("Cloudflare Tunnel stopped before it became available.")
                 self._tunnels[port] = tunnel

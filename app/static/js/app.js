@@ -1660,7 +1660,14 @@ const App = {
 
     const buttons = Array.from(document.querySelectorAll("[data-tunnel-port]"))
       .filter(button => Number(button.dataset.tunnelPort) === port);
-    buttons.forEach(button => { button.disabled = true; });
+    const originalButtonHtml = new Map(buttons.map(button => [button, button.innerHTML]));
+    const pendingLabel = t(isClosing ? "port_tunnel_closing" : "port_tunnel_opening");
+    buttons.forEach(button => {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1" aria-hidden="true"></i> ' +
+        UI.escape(pendingLabel);
+    });
 
     try {
       if (isClosing) {
@@ -1673,7 +1680,11 @@ const App = {
       await this.refreshPortsPage(false);
     } catch (error) {
       UI.toast(error.message || t("port_tunnel_error"), "error");
-      buttons.forEach(button => { button.disabled = false; });
+      buttons.forEach(button => {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.innerHTML = originalButtonHtml.get(button) || "";
+      });
     }
   },
 

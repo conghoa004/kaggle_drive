@@ -133,8 +133,13 @@ class CloudflareTunnelService:
         print(f"[!] Public tunnel health check failed: {last_error}", flush=True)
         return False
 
-    def start_tunnel(self, port: int, quick: bool = False) -> Optional[str]:
-        """Start cloudflared and verify quick-tunnel readiness over public HTTP."""
+    def start_tunnel(
+        self,
+        port: int,
+        quick: bool = False,
+        verify_public_health: bool = True,
+    ) -> Optional[str]:
+        """Start cloudflared and optionally verify public application health."""
         self.ensure_binary()
         self.stop_tunnel()
         print(f"[*] Starting Cloudflare Tunnel for 127.0.0.1:{port}...")
@@ -181,12 +186,13 @@ class CloudflareTunnelService:
             if match:
                 public_url = match.group(0)
                 self.public_url = public_url
-                print("[*] Tunnel URL received; checking public /health...", flush=True)
-                if self._wait_for_public_health(public_url):
+                if verify_public_health:
+                    print("[*] Tunnel URL received; checking public /health...", flush=True)
+                    if not self._wait_for_public_health(public_url):
+                        self.stop_tunnel()
+                        raise RuntimeError(f"Public health check timed out for {public_url}/health.")
                     self.url_verified = True
-                    return self.public_url
-                self.stop_tunnel()
-                raise RuntimeError(f"Public health check timed out for {public_url}/health.")
+                return self.public_url
         if settings.TUNNEL_TOKEN and not quick:
             if self.process.poll() is not None:
                 raise RuntimeError("Named Cloudflare Tunnel process exited: " + "\n".join(error_lines[-20:]))
