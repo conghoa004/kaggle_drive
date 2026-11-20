@@ -136,6 +136,8 @@ class PtyTerminalService:
                         data = message.get("data", "")
                         if isinstance(data, str) and data:
                             os.write(master_fd, data.encode("utf-8"))
+                    elif kind == "ping":
+                        await websocket.send_json({"type": "pong"})
                     elif kind == "resize":
                         try:
                             cols = max(20, min(int(message.get("cols", 80)), 300))

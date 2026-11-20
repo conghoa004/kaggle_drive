@@ -1907,6 +1907,7 @@ const App = {
     const url = `${protocol}//${window.location.host}/api/system/terminal/ws?cwd=${encodeURIComponent(cwd || "")}`;
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
+    let terminalHeartbeatTimer = null;
     let serverSentTerminalError = false;
     this.terminalSocket = socket;
 
@@ -1918,11 +1919,17 @@ const App = {
       for (const data of this.terminalPendingInput.splice(0)) {
         socket.send(JSON.stringify({ type: "input", data }));
       }
+      terminalHeartbeatTimer = window.setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          try { socket.send(JSON.stringify({ type: "ping" })); } catch (_) {}
+        }
+      }, 20000);
     };
     socket.onmessage = event => {
       if (typeof event.data === "string") {
         try {
           const message = JSON.parse(event.data);
+          if (message.type === "pong") return;
           if (message.type === "error") {
             serverSentTerminalError = true;
             this.terminalInstance.writeln(`\r\n\x1b[31m${message.message || "Terminal error"}\x1b[0m`);
@@ -1939,6 +1946,10 @@ const App = {
       // Wait for onclose, which includes the close code and any server reason.
     };
     socket.onclose = event => {
+      if (terminalHeartbeatTimer !== null) {
+        window.clearInterval(terminalHeartbeatTimer);
+        terminalHeartbeatTimer = null;
+      }
       const wasCurrentSocket = this.terminalSocket === socket;
       if (wasCurrentSocket) {
         this.terminalSocket = null;
