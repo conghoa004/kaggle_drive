@@ -34,6 +34,7 @@ const App = {
     this.renderBreadcrumb();
     this.renderFiles();
     this.updateSelectionBar();
+    this.renderTerminalTabs();
     const statsModal = document.getElementById("systemStatsModal");
     if (statsModal && statsModal.classList.contains("show") && AppState.systemStats) {
       this.renderSystemStatsModal(AppState.systemStats);
@@ -1835,6 +1836,10 @@ const App = {
     `;
   },
 
+
+  terminalTabs: [],
+  activeTerminalTabId: null,
+  terminalTabCounter: 0,
   terminalInstance: null,
   terminalFitAddon: null,
   terminalSocket: null,
@@ -1842,43 +1847,180 @@ const App = {
   terminalPendingInput: [],
   terminalRequestedCwd: null,
 
+  getActiveTerminalTab() {
+    return this.terminalTabs.find(tab => tab.id === this.activeTerminalTabId) || null;
+  },
+
+  terminalPath(cwd) {
+    const suffix = (cwd || "").replace(/^\/+|\/+$/g, "");
+    return suffix ? "/kaggle/working/" + suffix : "/kaggle/working";
+  },
+
+  renderTerminalTabs() {
+    const list = document.getElementById("terminalTabs");
+    if (list) {
+      list.replaceChildren();
+      const statuses = {
+        connected: t("terminal_status_connected"),
+        connecting: t("terminal_status_connecting"),
+        disconnected: t("terminal_status_disconnected"),
+        error: t("terminal_status_error")
+      };
+      this.terminalTabs.forEach(tab => {
+        const isActive = tab.id === this.activeTerminalTabId;
+        const item = document.createElement("div");
+        item.className = "terminal-tab" + (isActive ? " is-active" : "");
+
+        const select = document.createElement("button");
+        select.type = "button";
+        select.className = "terminal-tab-select";
+        select.setAttribute("role", "tab");
+        select.setAttribute("aria-selected", String(isActive));
+        select.setAttribute("aria-controls", "terminal-panel-" + tab.id);
+        select.title = tab.title + " — " + this.terminalPath(tab.cwd);
+        select.addEventListener("click", () => this.activateTerminalTab(tab.id));
+
+        const status = document.createElement("span");
+        status.className = "terminal-tab-status is-" + (tab.status || "connecting");
+        status.title = statuses[tab.status] || statuses.connecting;
+        status.setAttribute("aria-label", status.title);
+
+        const label = document.createElement("span");
+        label.className = "terminal-tab-label";
+        label.textContent = tab.title;
+        select.append(status, label);
+
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "terminal-tab-close";
+        close.title = t("terminal_close_tab", { name: tab.title });
+        close.setAttribute("aria-label", close.title);
+        close.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        close.addEventListener("click", () => this.closeTerminalTab(tab.id));
+
+        item.append(select, close);
+        list.appendChild(item);
+      });
+    }
+
+    const hasTabs = this.terminalTabs.length > 0;
+    const emptyState = document.getElementById("terminalEmptyState");
+    const terminalWindow = document.getElementById("terminalWindow");
+    if (emptyState) emptyState.classList.toggle("hidden", hasTabs);
+    if (terminalWindow) terminalWindow.classList.toggle("hidden", !hasTabs);
+  },
+
+  createTerminalTab(cwd = "") {
+    if (this.terminalTabs.length >= 4) {
+      UI.toast(t("terminal_max_tabs"), "warning");
+      return null;
+    }
+
+    const number = ++this.terminalTabCounter;
+    const tab = {
+      id: "terminal-" + number,
+      title: "Terminal " + number,
+      cwd: cwd || "",
+      status: "connecting",
+      instance: null,
+      fitAddon: null,
+      socket: null,
+      resizeObserver: null,
+      pendingInput: [],
+      heartbeatTimer: null,
+      serverSentTerminalError: false,
+      container: null
+    };
+    this.terminalTabs.push(tab);
+    this.initTerminalEmulator(tab);
+    this.renderTerminalTabs();
+    this.activateTerminalTab(tab.id);
+    return tab;
+  },
+
   openTerminalModal(targetCwd = null) {
     this.hideContextMenu();
     this.toggleMobileSidebar(false);
 
     const cwd = targetCwd !== null ? targetCwd : (AppState.currentPath || "");
-    this.setTerminalMinimized(false);
-    AppState.terminalCwd = cwd;
-    const promptPath = cwd ? `/kaggle/working/${cwd}` : "/kaggle/working";
-    const headerEl = document.getElementById("terminalHeaderTitle");
-    if (headerEl) headerEl.textContent = `bash - ${promptPath}`;
+    let tab = targetCwd !== null ? this.createTerminalTab(cwd) : this.getActiveTerminalTab();
+    if (!tab) tab = this.getActiveTerminalTab() || this.createTerminalTab(cwd);
 
+    this.setTerminalMinimized(false);
     UI.openModal("terminalModal");
-    this.initTerminalEmulator();
+    if (!tab) return;
+    this.activateTerminalTab(tab.id);
     setTimeout(() => {
-      this.fitTerminal();
-      if (this.terminalInstance) this.terminalInstance.focus();
-      const socketOpen = this.terminalSocket && this.terminalSocket.readyState <= WebSocket.OPEN;
-      const selectedFolderChanged = targetCwd !== null && cwd !== this.terminalRequestedCwd;
-      if (selectedFolderChanged && this.terminalSocket) {
-        this.terminalSocket.close(1000, "Starting terminal in selected folder");
-        this.terminalSocket = null;
+      if (this.activeTerminalTabId !== tab.id) return;
+      this.fitTerminal(tab);
+      if (tab.instance) tab.instance.focus();
+      if (tab.instance && (!tab.socket || tab.socket.readyState > WebSocket.OPEN)) {
+        this.connectTerminal(tab);
       }
-      if (!socketOpen || selectedFolderChanged) this.connectTerminal(cwd);
     }, 120);
   },
 
-  initTerminalEmulator() {
-    const container = document.getElementById("terminalWindow");
-    if (!container || this.terminalInstance) return;
+  openNewTerminalTab() {
+    this.hideContextMenu();
+    this.toggleMobileSidebar(false);
+    this.setTerminalMinimized(false);
+    UI.openModal("terminalModal");
+    const tab = this.createTerminalTab(AppState.currentPath || "");
+    if (!tab) return;
+    setTimeout(() => {
+      if (this.activeTerminalTabId !== tab.id) return;
+      this.fitTerminal(tab);
+      if (tab.instance) tab.instance.focus();
+      if (tab.instance) this.connectTerminal(tab);
+    }, 120);
+  },
+
+  activateTerminalTab(tabId) {
+    const tab = this.terminalTabs.find(item => item.id === tabId);
+    if (!tab) return;
+    this.activeTerminalTabId = tab.id;
+    this.terminalTabs.forEach(item => {
+      if (item.container) item.container.hidden = item.id !== tab.id;
+    });
+
+    this.terminalInstance = tab.instance;
+    this.terminalFitAddon = tab.fitAddon;
+    this.terminalSocket = tab.socket;
+    this.terminalResizeObserver = tab.resizeObserver;
+    this.terminalPendingInput = tab.pendingInput;
+    this.terminalRequestedCwd = tab.cwd;
+    AppState.terminalCwd = tab.cwd;
+
+    const header = document.getElementById("terminalHeaderTitle");
+    if (header) header.textContent = tab.title + " — bash - " + this.terminalPath(tab.cwd);
+    this.renderTerminalTabs();
+
+    requestAnimationFrame(() => {
+      if (this.activeTerminalTabId !== tab.id) return;
+      this.fitTerminal(tab);
+      if (tab.instance) tab.instance.focus();
+    });
+  },
+
+  initTerminalEmulator(tab) {
+    const parent = document.getElementById("terminalWindow");
+    if (!parent) return false;
+    const container = document.createElement("div");
+    container.id = "terminal-panel-" + tab.id;
+    container.className = "terminal-tab-panel";
+    container.hidden = true;
+    parent.appendChild(container);
+    tab.container = container;
+
     const TerminalCtor = window.Terminal?.Terminal || window.Terminal;
     const FitAddonCtor = window.FitAddon?.FitAddon;
     if (!TerminalCtor || !FitAddonCtor) {
       container.textContent = "Terminal emulator assets could not be loaded. Check the notebook internet connection and reload the page.";
-      return;
+      tab.status = "error";
+      return false;
     }
 
-    this.terminalInstance = new TerminalCtor({
+    tab.instance = new TerminalCtor({
       cursorBlink: true,
       convertEol: false,
       scrollback: 3000,
@@ -1891,73 +2033,80 @@ const App = {
         selectionBackground: "#334155"
       }
     });
-    this.terminalFitAddon = new FitAddonCtor();
-    this.terminalInstance.loadAddon(this.terminalFitAddon);
-    this.terminalInstance.open(container);
-    this.terminalInstance.onData(data => this.sendTerminalInput(data));
-    this.terminalResizeObserver = new ResizeObserver(() => this.fitTerminal());
-    this.terminalResizeObserver.observe(container);
+    tab.fitAddon = new FitAddonCtor();
+    tab.instance.loadAddon(tab.fitAddon);
+    tab.instance.open(container);
+    tab.instance.onData(data => this.sendTerminalInput(data, tab));
+    tab.resizeObserver = new ResizeObserver(() => this.fitTerminal(tab));
+    tab.resizeObserver.observe(container);
+    return true;
   },
 
-  connectTerminal(cwd = "") {
-    if (!this.terminalInstance) return;
-    if (this.terminalSocket && this.terminalSocket.readyState <= WebSocket.OPEN) return;
-    this.terminalRequestedCwd = cwd || "";
+  connectTerminal(tab = this.getActiveTerminalTab()) {
+    if (!tab || !tab.instance) return;
+    if (tab.socket && tab.socket.readyState <= WebSocket.OPEN) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/api/system/terminal/ws?cwd=${encodeURIComponent(cwd || "")}`;
+    const url = protocol + "//" + window.location.host + "/api/system/terminal/ws?cwd=" + encodeURIComponent(tab.cwd || "");
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
-    let terminalHeartbeatTimer = null;
-    let serverSentTerminalError = false;
-    this.terminalSocket = socket;
+    tab.serverSentTerminalError = false;
+    tab.socket = socket;
+    if (this.activeTerminalTabId === tab.id) this.terminalSocket = socket;
+    tab.status = "connecting";
+    this.renderTerminalTabs();
 
     socket.onopen = () => {
-      if (this.terminalSocket !== socket) return;
-      this.fitTerminal();
-      this.sendTerminalResize();
-      this.terminalInstance.focus();
-      for (const data of this.terminalPendingInput.splice(0)) {
+      if (tab.socket !== socket) return;
+      tab.status = "connected";
+      this.renderTerminalTabs();
+      this.fitTerminal(tab);
+      if (this.activeTerminalTabId === tab.id) tab.instance.focus();
+      for (const data of tab.pendingInput.splice(0)) {
         socket.send(JSON.stringify({ type: "input", data }));
       }
-      terminalHeartbeatTimer = window.setInterval(() => {
+      tab.heartbeatTimer = window.setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) {
           try { socket.send(JSON.stringify({ type: "ping" })); } catch (_) {}
         }
       }, 20000);
     };
     socket.onmessage = event => {
+      if (!tab.instance) return;
       if (typeof event.data === "string") {
         try {
           const message = JSON.parse(event.data);
           if (message.type === "pong") return;
           if (message.type === "error") {
-            serverSentTerminalError = true;
-            this.terminalInstance.writeln(`\r\n\x1b[31m${message.message || "Terminal error"}\x1b[0m`);
+            tab.serverSentTerminalError = true;
+            tab.status = "error";
+            tab.instance.writeln("\r\n\x1b[31m" + (message.message || "Terminal error") + "\x1b[0m");
+            this.renderTerminalTabs();
             return;
           }
         } catch (_) {}
-        this.terminalInstance.write(event.data);
+        tab.instance.write(event.data);
       } else {
-        this.terminalInstance.write(new Uint8Array(event.data));
+        tab.instance.write(new Uint8Array(event.data));
       }
     };
     socket.onerror = () => {
-      // Browsers do not expose handshake or network failure details here.
-      // Wait for onclose, which includes the close code and any server reason.
+      // Browsers hide handshake and network details; onclose provides the close code.
     };
     socket.onclose = event => {
-      if (terminalHeartbeatTimer !== null) {
-        window.clearInterval(terminalHeartbeatTimer);
-        terminalHeartbeatTimer = null;
+      if (tab.heartbeatTimer !== null) {
+        window.clearInterval(tab.heartbeatTimer);
+        tab.heartbeatTimer = null;
       }
-      const wasCurrentSocket = this.terminalSocket === socket;
+      const wasCurrentSocket = tab.socket === socket;
       if (wasCurrentSocket) {
-        this.terminalSocket = null;
-        this.setTerminalMinimized(false);
+        tab.socket = null;
+        tab.status = tab.serverSentTerminalError ? "error" : "disconnected";
+        if (this.activeTerminalTabId === tab.id) this.terminalSocket = null;
+        this.renderTerminalTabs();
       }
-      if (!wasCurrentSocket || event.code === 1000 || serverSentTerminalError) return;
+      if (!wasCurrentSocket || event.code === 1000 || tab.serverSentTerminalError || !tab.instance) return;
 
-      let message = `Terminal disconnected (WebSocket code ${event.code || "unknown"}).`;
+      let message = "Terminal disconnected (WebSocket code " + (event.code || "unknown") + ").";
       if (event.code === 1006) {
         message = "Terminal connection was interrupted. Check the network or Cloudflare Tunnel, then reopen the terminal.";
       } else if (event.code === 1008) {
@@ -1968,8 +2117,8 @@ const App = {
         message = "The terminal server encountered an error. Reopen the terminal and try again.";
       }
       const reason = typeof event.reason === "string" ? event.reason.trim().slice(0, 160) : "";
-      if (reason && event.code !== 1006) message += ` Details: ${reason}`;
-      this.terminalInstance.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
+      if (reason && event.code !== 1006) message += " Details: " + reason;
+      tab.instance.writeln("\r\n\x1b[31m" + message + "\x1b[0m");
     };
   },
 
@@ -1985,6 +2134,47 @@ const App = {
     UI.closeModal("terminalModal");
   },
 
+  disposeTerminalTab(tab) {
+    if (tab.heartbeatTimer !== null) {
+      window.clearInterval(tab.heartbeatTimer);
+      tab.heartbeatTimer = null;
+    }
+    const socket = tab.socket;
+    tab.socket = null;
+    if (socket && socket.readyState < WebSocket.CLOSING) {
+      socket.close(1000, "Terminal tab closed");
+    }
+    if (tab.resizeObserver) tab.resizeObserver.disconnect();
+    if (tab.instance) tab.instance.dispose();
+    if (tab.container) tab.container.remove();
+  },
+
+  closeTerminalTab(tabId) {
+    const index = this.terminalTabs.findIndex(tab => tab.id === tabId);
+    if (index < 0) return;
+    const wasActive = this.activeTerminalTabId === tabId;
+    this.disposeTerminalTab(this.terminalTabs[index]);
+    this.terminalTabs.splice(index, 1);
+
+    if (wasActive) {
+      const nextTab = this.terminalTabs[Math.min(index, this.terminalTabs.length - 1)] || null;
+      this.activeTerminalTabId = nextTab ? nextTab.id : null;
+    }
+    if (this.activeTerminalTabId) {
+      this.activateTerminalTab(this.activeTerminalTabId);
+    } else {
+      this.terminalInstance = null;
+      this.terminalFitAddon = null;
+      this.terminalSocket = null;
+      this.terminalResizeObserver = null;
+      this.terminalPendingInput = [];
+      this.terminalRequestedCwd = null;
+      const header = document.getElementById("terminalHeaderTitle");
+      if (header) header.textContent = t("terminal_title");
+      this.renderTerminalTabs();
+    }
+  },
+
   closeTerminalWindow() {
     this.closeTerminalSession();
     UI.closeModal("terminalModal");
@@ -1992,55 +2182,58 @@ const App = {
 
   closeTerminalSession() {
     this.setTerminalMinimized(false);
-    const socket = this.terminalSocket;
-    this.terminalSocket = null;
-    if (socket && socket.readyState < WebSocket.CLOSING) {
-      socket.close(1000, "User signed out");
-    }
-    this.terminalPendingInput.length = 0;
-    if (this.terminalResizeObserver) this.terminalResizeObserver.disconnect();
-    this.terminalResizeObserver = null;
-    if (this.terminalInstance) this.terminalInstance.dispose();
+    this.terminalTabs.slice().forEach(tab => this.disposeTerminalTab(tab));
+    this.terminalTabs = [];
+    this.activeTerminalTabId = null;
     this.terminalInstance = null;
     this.terminalFitAddon = null;
+    this.terminalSocket = null;
+    this.terminalResizeObserver = null;
+    this.terminalPendingInput = [];
+    this.terminalRequestedCwd = null;
+    const header = document.getElementById("terminalHeaderTitle");
+    if (header) header.textContent = t("terminal_title");
+    this.renderTerminalTabs();
   },
 
-  sendTerminalInput(data) {
-    const socket = this.terminalSocket;
+  sendTerminalInput(data, tab = this.getActiveTerminalTab()) {
+    if (!tab) return;
+    const socket = tab.socket;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "input", data }));
     } else if (socket && socket.readyState === WebSocket.CONNECTING) {
-      this.terminalPendingInput.push(data);
+      tab.pendingInput.push(data);
     }
   },
 
-  sendTerminalResize() {
-    const socket = this.terminalSocket;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !this.terminalInstance) return;
-    socket.send(JSON.stringify({
+  sendTerminalResize(tab = this.getActiveTerminalTab()) {
+    if (!tab || !tab.socket || tab.socket.readyState !== WebSocket.OPEN || !tab.instance) return;
+    tab.socket.send(JSON.stringify({
       type: "resize",
-      cols: this.terminalInstance.cols,
-      rows: this.terminalInstance.rows
+      cols: tab.instance.cols,
+      rows: tab.instance.rows
     }));
   },
 
-  fitTerminal() {
-    if (!this.terminalFitAddon || !this.terminalInstance) return;
+  fitTerminal(tab = this.getActiveTerminalTab()) {
+    if (!tab || !tab.fitAddon || !tab.instance) return;
     try {
-      this.terminalFitAddon.fit();
-      this.sendTerminalResize();
+      tab.fitAddon.fit();
+      this.sendTerminalResize(tab);
     } catch (_) {}
   },
 
   clearTerminal() {
-    if (this.terminalInstance) this.terminalInstance.clear();
+    const tab = this.getActiveTerminalTab();
+    if (tab && tab.instance) tab.instance.clear();
   },
 
   copyTerminalOutput() {
-    if (!this.terminalInstance) return;
-    this.terminalInstance.selectAll();
-    const text = this.terminalInstance.getSelection();
-    this.terminalInstance.clearSelection();
+    const tab = this.getActiveTerminalTab();
+    if (!tab || !tab.instance) return;
+    tab.instance.selectAll();
+    const text = tab.instance.getSelection();
+    tab.instance.clearSelection();
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
       UI.toast(t("terminal_copy_toast"), "success");
@@ -2050,9 +2243,10 @@ const App = {
   },
 
   runTerminalCommand(command) {
-    if (!command || !this.terminalInstance) return;
-    this.terminalInstance.paste(`${command}\r`);
-    this.terminalInstance.focus();
+    const tab = this.getActiveTerminalTab();
+    if (!command || !tab || !tab.instance) return;
+    tab.instance.paste(command + "\r");
+    tab.instance.focus();
   },
 
   initDragSelect() {

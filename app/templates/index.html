@@ -571,6 +571,14 @@
       </div>
 
       <!-- Quick Command Chips Toolbar -->
+      <div class="terminal-tab-bar">
+        <div id="terminalTabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions"></div>
+        <button type="button" class="terminal-new-tab" onclick="App.openNewTerminalTab()" title="New terminal tab" data-i18n-title="terminal_new_tab">
+          <i class="fa-solid fa-plus"></i>
+          <span data-i18n="terminal_new_tab">New tab</span>
+        </button>
+      </div>
+
       <div class="px-4 py-2.5 bg-slate-900/60 border-b border-slate-800/80 flex items-center gap-2 overflow-x-auto">
         <span class="text-[11px] font-mono text-slate-400 shrink-0 font-medium" data-i18n="terminal_quick_cmds">Lệnh nhanh:</span>
         <button class="terminal-chip" onclick="App.runTerminalCommand('ls -la')"><i class="fa-solid fa-list-ul text-sky-400 mr-1"></i>ls -la</button>
@@ -583,6 +591,10 @@
 
       <!-- Terminal Window -->
       <div class="p-4 bg-slate-950 flex-1 overflow-hidden flex flex-col">
+        <div id="terminalEmptyState" class="terminal-empty-state hidden">
+          <i class="fa-solid fa-terminal text-slate-500 text-xl"></i>
+          <span data-i18n="terminal_empty">No terminal tabs open. Click New tab to start.</span>
+        </div>
         <div id="terminalWindow" class="terminal-window flex-1 min-h-[300px]"></div>
 
         <!-- xterm.js provides the shell prompt and keyboard input. -->
