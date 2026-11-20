@@ -63,50 +63,61 @@ Folder selection uses the browser's directory upload input. Some browsers displa
 
 ### Kaggle Notebook
 
-Enable Internet in the notebook settings if you want to use Cloudflare Tunnel or allow the app to download Cloudflared/code-server. Clone the `coder` branch to get the IDE feature:
+Turn on Internet in the Kaggle Notebook settings to use Cloudflare Tunnel and allow the runtime to download Cloudflared when needed. In a notebook cell:
 
 ```python
+import os
+
 %cd /kaggle/working
-!git clone --branch coder https://github.com/conghoa004/kaggle_drive.git
+
+PROJECT_DIR = "/kaggle/working/kaggle_drive"
+
+# 1. Clone or update repository from GitHub
+if not os.path.isdir(PROJECT_DIR):
+    print("[*] Cloning repository from GitHub...")
+    !git clone -b coder https://github.com/conghoa004/kaggle_drive.git
+else:
+    print("[*] Repository exists -> Pulling latest changes...")
+    %cd /kaggle/working/kaggle_drive
+    !git pull
+
 %cd /kaggle/working/kaggle_drive
-!pip install -r requirements.txt
-!python start_server.py --foreground --lang vi
+
+# 2. Install dependencies
+print("[*] Installing dependencies...")
+!pip install -q -r requirements.txt
+
+# 3. Start the server in the background
+print("[*] Starting Kaggle Cloud Drive...")
+
+# Run with default settings (--lang en --username admin --password auto)
+# !python start_server.py
+
+# Optional: --lang vi|en|zh, --username <user>, --password <pass>
+# !python start_server.py --lang en --username admin --password your_password
+
+# Keep the notebook cell attached to the server and stream logs in real time:
+!python start_server.py --foreground
 ```
 
-The foreground cell stays attached to the server. Keep it running while using the app; interrupt it to shut the server down.
-
-To run the server in the background instead:
-
-```python
-!python start_server.py --lang vi
-```
-
-The launcher prints the login credentials and startup status. The generated password is used when `KAGGLE_DRIVE_PASSWORD` or `--password` is not set. Background output is written to `server.log`. Stop a background server with:
+The background launcher writes output to `server.log`. Stop it from another cell:
 
 ```python
 !python /kaggle/working/kaggle_drive/stop_server.py
 ```
 
-To update an existing checkout of this branch:
-
-```python
-%cd /kaggle/working/kaggle_drive
-!git checkout coder
-!git pull origin coder
-```
-
 ### Local development
 
-Use a dedicated directory as the managed root. The application defaults to `/` when `KAGGLE_DRIVE_ROOT` is not set, so explicitly pass a narrower path for local use.
+Use a dedicated workspace directory rather than the default root:
 
 ```bash
-git clone --branch coder https://github.com/conghoa004/kaggle_drive.git
+git clone --branch main https://github.com/conghoa004/kaggle_drive.git
 cd kaggle_drive
 pip install -r requirements.txt
 python run.py --root ./workspace --port 8000 --lang en --no-tunnel
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The app prints the username and password at startup. The terminal and automatic code-server installation require Linux; core file management works without them.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The terminal requires Linux; the rest of the file manager can run on Windows and macOS.
 
 ## Command-line options
 
