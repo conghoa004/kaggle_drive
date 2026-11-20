@@ -1907,6 +1907,7 @@ const App = {
     const url = `${protocol}//${window.location.host}/api/system/terminal/ws?cwd=${encodeURIComponent(cwd || "")}`;
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
+    let serverSentTerminalError = false;
     this.terminalSocket = socket;
 
     socket.onopen = () => {
@@ -1923,6 +1924,7 @@ const App = {
         try {
           const message = JSON.parse(event.data);
           if (message.type === "error") {
+            serverSentTerminalError = true;
             this.terminalInstance.writeln(`\r\n\x1b[31m${message.message || "Terminal error"}\x1b[0m`);
             return;
           }
@@ -1933,18 +1935,30 @@ const App = {
       }
     };
     socket.onerror = () => {
-      if (this.terminalSocket === socket) {
-        this.terminalInstance.writeln("\r\n\x1b[31mWebSocket terminal connection failed.\x1b[0m");
-      }
+      // Browsers do not expose handshake or network failure details here.
+      // Wait for onclose, which includes the close code and any server reason.
     };
     socket.onclose = event => {
-      if (this.terminalSocket === socket) {
+      const wasCurrentSocket = this.terminalSocket === socket;
+      if (wasCurrentSocket) {
         this.terminalSocket = null;
         this.setTerminalMinimized(false);
       }
-      if (event.code === 1008) {
-        this.terminalInstance.writeln("\r\n\x1b[31mTerminal session rejected. Please sign in again.\x1b[0m");
+      if (!wasCurrentSocket || event.code === 1000 || serverSentTerminalError) return;
+
+      let message = `Terminal disconnected (WebSocket code ${event.code || "unknown"}).`;
+      if (event.code === 1006) {
+        message = "Terminal connection was interrupted. Check the network or Cloudflare Tunnel, then reopen the terminal.";
+      } else if (event.code === 1008) {
+        message = "Terminal session rejected. Sign in again or check the selected working directory.";
+      } else if (event.code === 1013) {
+        message = "All terminal sessions are busy. Close another terminal and try again.";
+      } else if (event.code === 1011) {
+        message = "The terminal server encountered an error. Reopen the terminal and try again.";
       }
+      const reason = typeof event.reason === "string" ? event.reason.trim().slice(0, 160) : "";
+      if (reason && event.code !== 1006) message += ` Details: ${reason}`;
+      this.terminalInstance.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
     };
   },
 
