@@ -81,7 +81,7 @@ PROJECT_DIR = "/kaggle/working/kaggle_drive"
 # 1. Clone or update repository from GitHub
 if not os.path.isdir(PROJECT_DIR):
     print("[*] Cloning repository from GitHub...")
-    !git clone -b coder https://github.com/conghoa004/kaggle_drive.git
+    !git clone -b main https://github.com/conghoa004/kaggle_drive.git
 else:
     print("[*] Repository exists -> Pulling latest changes...")
     %cd /kaggle/working/kaggle_drive
