@@ -1862,6 +1862,7 @@ const App = {
       const statuses = {
         connected: t("terminal_status_connected"),
         connecting: t("terminal_status_connecting"),
+        reconnecting: t("terminal_status_reconnecting"),
         disconnected: t("terminal_status_disconnected"),
         error: t("terminal_status_error")
       };
@@ -1930,6 +1931,10 @@ const App = {
       pendingInput: [],
       heartbeatTimer: null,
       serverSentTerminalError: false,
+      reconnectTimer: null,
+      stableTimer: null,
+      reconnectAttempts: 0,
+      reconnectNoticeShown: false,
       container: null
     };
     this.terminalTabs.push(tab);
@@ -2045,6 +2050,10 @@ const App = {
 
   connectTerminal(tab = this.getActiveTerminalTab()) {
     if (!tab || !tab.instance) return;
+    if (tab.reconnectTimer !== null) {
+      window.clearTimeout(tab.reconnectTimer);
+      tab.reconnectTimer = null;
+    }
     if (tab.socket && tab.socket.readyState <= WebSocket.OPEN) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = protocol + "//" + window.location.host + "/api/system/terminal/ws?cwd=" + encodeURIComponent(tab.cwd || "");
@@ -2059,6 +2068,15 @@ const App = {
     socket.onopen = () => {
       if (tab.socket !== socket) return;
       tab.status = "connected";
+      if (tab.stableTimer !== null) window.clearTimeout(tab.stableTimer);
+      tab.stableTimer = window.setTimeout(() => {
+        if (tab.socket === socket) tab.reconnectAttempts = 0;
+        tab.stableTimer = null;
+      }, 10000);
+      if (tab.reconnectNoticeShown) {
+        tab.instance.writeln("\r\n\x1b[32mReconnected with a new shell session.\x1b[0m");
+        tab.reconnectNoticeShown = false;
+      }
       this.renderTerminalTabs();
       this.fitTerminal(tab);
       if (this.activeTerminalTabId === tab.id) tab.instance.focus();
@@ -2079,8 +2097,10 @@ const App = {
           if (message.type === "pong") return;
           if (message.type === "error") {
             tab.serverSentTerminalError = true;
-            tab.status = "error";
-            tab.instance.writeln("\r\n\x1b[31m" + (message.message || "Terminal error") + "\x1b[0m");
+            tab.status = tab.reconnectAttempts > 0 ? "reconnecting" : "error";
+            if (tab.reconnectAttempts === 0) {
+              tab.instance.writeln("\r\n\x1b[31m" + (message.message || "Terminal error") + "\x1b[0m");
+            }
             this.renderTerminalTabs();
             return;
           }
@@ -2098,29 +2118,49 @@ const App = {
         window.clearInterval(tab.heartbeatTimer);
         tab.heartbeatTimer = null;
       }
+      if (tab.stableTimer !== null) {
+        window.clearTimeout(tab.stableTimer);
+        tab.stableTimer = null;
+      }
       const wasCurrentSocket = tab.socket === socket;
       if (wasCurrentSocket) {
         tab.socket = null;
-        tab.status = tab.serverSentTerminalError ? "error" : "disconnected";
+        tab.status = tab.serverSentTerminalError && event.code !== 1013 ? "error" : "disconnected";
         if (this.activeTerminalTabId === tab.id) this.terminalSocket = null;
         this.renderTerminalTabs();
       }
-      if (!wasCurrentSocket || event.code === 1000 || tab.serverSentTerminalError || !tab.instance) return;
+      if (!wasCurrentSocket || event.code === 1000 || !tab.instance) return;
 
-      let message = "Terminal disconnected (WebSocket code " + (event.code || "unknown") + ").";
-      if (event.code === 1006) {
-        message = "Terminal connection was interrupted. Check the network or Cloudflare Tunnel, then reopen the terminal.";
-      } else if (event.code === 1008) {
-        message = "Terminal session rejected. Sign in again or check the selected working directory.";
-      } else if (event.code === 1013) {
-        message = "All terminal sessions are busy. Close another terminal and try again.";
-      } else if (event.code === 1011) {
-        message = "The terminal server encountered an error. Reopen the terminal and try again.";
+      const shouldRetry = event.code !== 1008 &&
+        (!tab.serverSentTerminalError || event.code === 1013);
+      if (!tab.serverSentTerminalError && !shouldRetry) {
+        tab.instance.writeln("\r\n\x1b[31mTerminal session rejected. Please sign in again.\x1b[0m");
       }
-      const reason = typeof event.reason === "string" ? event.reason.trim().slice(0, 160) : "";
-      if (reason && event.code !== 1006) message += " Details: " + reason;
-      tab.instance.writeln("\r\n\x1b[31m" + message + "\x1b[0m");
+      if (shouldRetry) this.scheduleTerminalReconnect(tab);
     };
+  },
+
+
+  scheduleTerminalReconnect(tab) {
+    if (!this.terminalTabs.includes(tab) || !tab.instance || tab.socket) return;
+    if (tab.reconnectTimer !== null) window.clearTimeout(tab.reconnectTimer);
+
+    const delay = Math.min(1000 * Math.pow(2, tab.reconnectAttempts), 30000);
+    tab.reconnectAttempts += 1;
+    tab.status = "reconnecting";
+    this.renderTerminalTabs();
+    if (!tab.reconnectNoticeShown) {
+      tab.instance.writeln(
+        "\r\n\x1b[33mConnection lost. Reconnecting in " + Math.ceil(delay / 1000) +
+        "s; the previous shell session will not resume.\x1b[0m"
+      );
+      tab.reconnectNoticeShown = true;
+    }
+
+    tab.reconnectTimer = window.setTimeout(() => {
+      tab.reconnectTimer = null;
+      if (this.terminalTabs.includes(tab) && !tab.socket) this.connectTerminal(tab);
+    }, delay);
   },
 
   setTerminalMinimized(minimized) {
@@ -2139,6 +2179,14 @@ const App = {
     if (tab.heartbeatTimer !== null) {
       window.clearInterval(tab.heartbeatTimer);
       tab.heartbeatTimer = null;
+    }
+    if (tab.reconnectTimer !== null) {
+      window.clearTimeout(tab.reconnectTimer);
+      tab.reconnectTimer = null;
+    }
+    if (tab.stableTimer !== null) {
+      window.clearTimeout(tab.stableTimer);
+      tab.stableTimer = null;
     }
     const socket = tab.socket;
     tab.socket = null;

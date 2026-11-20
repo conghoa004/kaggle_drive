@@ -2495,6 +2495,7 @@
 }
 .terminal-tab-status.is-connected { background: #34d399; }
 .terminal-tab-status.is-connecting { background: #fbbf24; }
+.terminal-tab-status.is-reconnecting { background: #38bdf8; }
 .terminal-tab-status.is-disconnected { background: #fb7185; }
 .terminal-tab-status.is-error { background: #ef4444; }
 .terminal-tab-close,
