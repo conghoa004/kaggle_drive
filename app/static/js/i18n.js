@@ -67,6 +67,10 @@ const I18n = {
       nav_storage: "Bộ nhớ",
       nav_terminal: "Kaggle Terminal",
       nav_resources: "Tài nguyên CPU/GPU/RAM",
+      nav_ports: "Cổng & Cloudflare Tunnel",
+      port_scan_loading: "Đang quét port...",
+      port_scan_success: "Đã cập nhật danh sách port.",
+      port_scan_retry: "Thử lại",
       disk_usage: "Dung lượng ổ đĩa",
       storage_detail_title: "Nhấn để xem chi tiết tài nguyên",
 
@@ -382,6 +386,10 @@ const I18n = {
       nav_storage: "Storage",
       nav_terminal: "Kaggle Terminal",
       nav_resources: "CPU/GPU/RAM Resources",
+      nav_ports: "Ports & Cloudflare Tunnel",
+      port_scan_loading: "Scanning listening ports...",
+      port_scan_success: "Port list updated.",
+      port_scan_retry: "Retry",
       disk_usage: "Disk Storage",
       storage_detail_title: "Click to view resource details",
 
@@ -697,6 +705,10 @@ const I18n = {
       nav_storage: "存储空间",
       nav_terminal: "Kaggle 终端",
       nav_resources: "CPU/GPU/RAM 资源监控",
+      nav_ports: "端口 & Cloudflare Tunnel",
+      port_scan_loading: "正在扫描监听端口...",
+      port_scan_success: "端口列表已更新。",
+      port_scan_retry: "重试",
       disk_usage: "磁盘容量",
       storage_detail_title: "点击查看资源详情",
 

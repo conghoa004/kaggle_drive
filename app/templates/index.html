@@ -252,9 +252,13 @@
         </div>
 
         <!-- Navigation Links -->
-        <div class="nav-link active" onclick="App.loadDirectory('')">
+        <div id="navStorage" class="nav-link active" onclick="App.loadDirectory('')">
           <i class="fa-solid fa-folder-open icon-folder"></i>
           <span data-i18n="nav_storage">Bộ nhớ</span>
+        </div>
+        <div id="navPorts" class="nav-link" onclick="App.openPortsPage()">
+          <i class="fa-solid fa-network-wired text-orange-500"></i>
+          <span data-i18n="nav_ports">Ports &amp; Cloudflare Tunnel</span>
         </div>
         <div id="navTerminal" class="nav-link" onclick="App.openTerminalModal()">
           <i class="fa-solid fa-terminal icon-code"></i>
@@ -356,6 +360,24 @@
 
         <!-- File View Container (Grid or List) -->
         <div id="fileViewContainer" class="flex-1"></div>
+      </main>
+      <main id="portManagerPage" class="hidden flex-1 flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200/60">
+          <h1 class="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-network-wired text-orange-500"></i>
+            <span data-i18n="port_manager_title">Ports &amp; Cloudflare Tunnel</span>
+          </h1>
+          <button id="btnRefreshPorts" class="btn-secondary text-xs py-2 px-3" onclick="App.refreshPortsPage(true)">
+            <i class="fa-solid fa-rotate"></i> <span data-i18n="port_manager_refresh">Rescan</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-500 mb-4" data-i18n="port_manager_note"></p>
+        <div id="portsPageBody" class="space-y-2">
+          <div class="flex items-center gap-2 text-sm text-slate-500 py-6">
+            <i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>
+            <span data-i18n="port_scan_loading">Scanning listening ports...</span>
+          </div>
+        </div>
       </main>
     </div>
   </div>

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, HTTPException, Request, WebSocket
 from app.security import require_auth
 from app.services.system_service import SystemService
@@ -5,6 +6,8 @@ from app.services.pty_terminal_service import PtyTerminalService
 from app.services.port_service import port_manager
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.get("/stats")
@@ -20,8 +23,12 @@ def get_listening_ports(request: Request):
     require_auth(request)
     try:
         return {"ports": port_manager.list_ports()}
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Could not read local listening ports")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not inspect local ports ({type(exc).__name__}): {exc}",
+        ) from exc
 
 
 @router.post("/ports/{port}/tunnel")
