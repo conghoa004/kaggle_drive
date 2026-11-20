@@ -1839,7 +1839,6 @@ const App = {
 
   terminalTabs: [],
   activeTerminalTabId: null,
-  terminalTabCounter: 0,
   terminalInstance: null,
   terminalFitAddon: null,
   terminalSocket: null,
@@ -1916,7 +1915,9 @@ const App = {
       return null;
     }
 
-    const number = ++this.terminalTabCounter;
+    const usedNumbers = new Set(this.terminalTabs.map(tab => Number(tab.id.split("-").pop())));
+    let number = 1;
+    while (usedNumbers.has(number)) number += 1;
     const tab = {
       id: "terminal-" + number,
       title: "Terminal " + number,
