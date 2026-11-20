@@ -722,6 +722,31 @@
     </div>
   </div>
 
+  <!-- Application Port Tunnel Confirmation Modal -->
+  <div id="portTunnelConfirmModal" class="modal-overlay" onclick="if(event.target === this) App.resolveApplicationTunnelClose(false)">
+    <div class="modal-content max-w-md">
+      <div class="modal-header">
+        <h3 class="modal-title text-red-600">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span data-i18n="port_application_tunnel_title">Confirm Close Tunnel</span>
+        </h3>
+        <button class="modal-close" onclick="App.resolveApplicationTunnelClose(false)" aria-label="Cancel">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="portTunnelConfirmMessage" class="text-sm text-slate-600 leading-relaxed"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary text-xs py-2 px-4" onclick="App.resolveApplicationTunnelClose(false)" data-i18n="cancel">Cancel</button>
+        <button class="btn-danger text-xs py-2 px-4" onclick="App.resolveApplicationTunnelClose(true)">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+          <span data-i18n="port_tunnel_close">Close tunnel</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Compress Modal -->
   <div id="compressModal" class="modal-overlay">
     <div class="modal-content max-w-sm">

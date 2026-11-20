@@ -19,6 +19,8 @@ const AppState = {
 };
 
 const App = {
+  portTunnelConfirmResolver: null,
+
   init() {
     I18n.init();
     this.bindEvents();
@@ -53,6 +55,11 @@ const App = {
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         this.hideContextMenu();
+        const portConfirmModal = document.getElementById("portTunnelConfirmModal");
+        if (portConfirmModal && portConfirmModal.classList.contains("show")) {
+          this.resolveApplicationTunnelClose(false);
+          return;
+        }
         const unsavedModal = document.getElementById("unsavedChangesModal");
         if (unsavedModal && unsavedModal.classList.contains("show")) {
           UI.closeModal("unsavedChangesModal");
@@ -1619,6 +1626,26 @@ const App = {
     body.innerHTML = '<div class="space-y-2">' + portCards + '</div>';
   },
 
+  confirmApplicationTunnelClose(port) {
+    return new Promise(resolve => {
+      if (this.portTunnelConfirmResolver) {
+        resolve(false);
+        return;
+      }
+      this.portTunnelConfirmResolver = resolve;
+      const message = document.getElementById("portTunnelConfirmMessage");
+      if (message) message.textContent = t("port_application_tunnel_confirm", { port });
+      UI.openModal("portTunnelConfirmModal");
+    });
+  },
+
+  resolveApplicationTunnelClose(confirmed) {
+    const resolve = this.portTunnelConfirmResolver;
+    this.portTunnelConfirmResolver = null;
+    UI.closeModal("portTunnelConfirmModal");
+    if (resolve) resolve(Boolean(confirmed));
+  },
+
   async togglePortTunnel(portValue) {
     const port = Number(portValue);
     const item = AppState.ports.find(entry => Number(entry.port) === port);
@@ -1626,7 +1653,7 @@ const App = {
 
     const isClosing = Boolean(item.tunnel && item.tunnel.active);
     if (isClosing && (item.is_application || port === 8000) &&
-        !window.confirm(t("port_application_tunnel_confirm", { port }))) {
+        !(await this.confirmApplicationTunnelClose(port))) {
       return;
     }
 
