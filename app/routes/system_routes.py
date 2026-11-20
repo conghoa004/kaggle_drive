@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Request, WebSocket
+import logging
+from fastapi import APIRouter, HTTPException, Request, WebSocket
 from app.security import require_auth
 from app.services.system_service import SystemService
 from app.services.pty_terminal_service import PtyTerminalService
+from app.services.port_service import port_manager
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.get("/stats")
@@ -11,6 +15,42 @@ def get_system_stats(request: Request):
     """Return disk space, RAM, CPU, and GPU statistics."""
     require_auth(request)
     return SystemService.get_full_stats()
+
+
+@router.get("/ports")
+def get_listening_ports(request: Request):
+    """Return local TCP listeners and their Cloudflare tunnel state."""
+    require_auth(request)
+    try:
+        return {"ports": port_manager.list_ports()}
+    except Exception as exc:
+        logger.exception("Could not read local listening ports")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not inspect local ports ({type(exc).__name__}): {exc}",
+        ) from exc
+
+
+@router.post("/ports/{port}/tunnel")
+def open_port_tunnel(request: Request, port: int):
+    """Expose a local TCP listener using a Cloudflare quick tunnel."""
+    require_auth(request)
+    try:
+        return port_manager.start_tunnel(port)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.delete("/ports/{port}/tunnel")
+def close_port_tunnel(request: Request, port: int):
+    """Stop the Cloudflare tunnel associated with one local port."""
+    require_auth(request)
+    try:
+        return port_manager.stop_tunnel(port)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.websocket("/terminal/ws")

@@ -65,7 +65,7 @@
   <input type="file" id="fileInput" multiple style="display: none;">
   <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
 
-  <!-- ================= 1. LOGIN SCREEN ================= -->
+  <!-- === 1. LOGIN SCREEN === -->
   <div id="loginView" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-slate-50 to-indigo-50">
     <div class="w-full max-w-md p-8 sm:p-10 bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-200/80 text-center animate-slide-up relative">
       <div class="w-16 h-16 mx-auto mb-5 bg-gradient-to-tr from-brand-600 to-brand-400 rounded-2xl flex items-center justify-center text-white text-3xl shadow-lg shadow-brand-500/30">
@@ -106,7 +106,7 @@
     </div>
   </div>
 
-  <!-- ================= 2. DASHBOARD APPLICATION ================= -->
+  <!-- === 2. DASHBOARD APPLICATION === -->
   <div id="appContainer" class="hidden h-screen flex-col overflow-hidden">
     <!-- Topbar -->
     <header class="h-16 px-4 sm:px-6 bg-white border-b border-slate-200/80 flex items-center justify-between gap-3 shrink-0 z-30 shadow-sm shadow-slate-100">
@@ -257,9 +257,16 @@
         </div>
 
         <!-- Navigation Links -->
-        <div class="nav-link active" onclick="App.loadDirectory('')">
+        <div id="navStorage" class="nav-link active" onclick="App.loadDirectory('')">
           <i class="fa-solid fa-folder-open icon-folder"></i>
           <span data-i18n="nav_storage">Bộ nhớ</span>
+
+
+        </div>
+        <div id="navPorts" class="nav-link" onclick="App.openPortsPage()">
+          <i class="fa-solid fa-network-wired text-orange-500"></i>
+          <span data-i18n="nav_ports">Ports Manager</span>
+
         </div>
         <a href="/ide/" target="_blank" rel="noopener noreferrer" class="nav-link no-underline" title="Open VS Code in a new tab" aria-label="Open VS Code in a new tab">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="#007ACC" aria-hidden="true" class="shrink-0"><path d="M23.15 2.587 18.21.21a1.49 1.49 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a1 1 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a1 1 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.49 1.49 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352m-5.146 14.861L10.826 12l7.178-5.448z"/></svg>
@@ -327,6 +334,10 @@
               <i class="fa-solid fa-cloud-arrow-up text-brand-600"></i>
               <span data-i18n="upload_file">Tải tệp lên</span>
             </button>
+            <button class="btn-tool" onclick="document.getElementById('folderInput').click()" title="Upload folder" data-i18n-title="upload_folder">
+              <i class="fa-solid fa-folder-open text-amber-500"></i>
+              <span data-i18n="upload_folder">Upload folder</span>
+            </button>
             <button class="btn-tool" onclick="App.promptNewFolder()" title="Tạo thư mục mới" data-i18n-title="new_folder_title">
               <i class="fa-solid fa-folder-plus text-amber-500"></i>
               <span data-i18n="new_folder">Thư mục mới</span>
@@ -366,10 +377,28 @@
         <!-- File View Container (Grid or List) -->
         <div id="fileViewContainer" class="flex-1"></div>
       </main>
+      <main id="portManagerPage" class="hidden flex-1 flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200/60">
+          <h1 class="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-network-wired text-orange-500"></i>
+            <span data-i18n="port_manager_title">Ports Manager</span>
+          </h1>
+          <button id="btnRefreshPorts" class="btn-secondary text-xs py-2 px-3" onclick="App.refreshPortsPage(true)">
+            <i class="fa-solid fa-rotate"></i> <span data-i18n="port_manager_refresh">Rescan</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-500 mb-4" data-i18n="port_manager_note"></p>
+        <div id="portsPageBody" class="space-y-2">
+          <div class="flex items-center gap-2 text-sm text-slate-500 py-6">
+            <i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>
+            <span data-i18n="port_scan_loading">Scanning listening ports...</span>
+          </div>
+        </div>
+      </main>
     </div>
   </div>
 
-  <!-- ================= 3. MODALS & OVERLAYS ================= -->
+  <!-- === 3. MODALS & OVERLAYS === -->
 
   <!-- Global Drag & Drop Overlay -->
   <div id="dragOverlay" class="drag-overlay">
@@ -558,6 +587,14 @@
       </div>
 
       <!-- Quick Command Chips Toolbar -->
+      <div class="terminal-tab-bar">
+        <div id="terminalTabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions"></div>
+        <button type="button" class="terminal-new-tab" onclick="App.openNewTerminalTab()" title="New terminal tab" data-i18n-title="terminal_new_tab">
+          <i class="fa-solid fa-plus"></i>
+          <span data-i18n="terminal_new_tab">New tab</span>
+        </button>
+      </div>
+
       <div class="px-4 py-2.5 bg-slate-900/60 border-b border-slate-800/80 flex items-center gap-2 overflow-x-auto">
         <span class="text-[11px] font-mono text-slate-400 shrink-0 font-medium" data-i18n="terminal_quick_cmds">Lệnh nhanh:</span>
         <button class="terminal-chip" onclick="App.runTerminalCommand('ls -la')"><i class="fa-solid fa-list-ul text-sky-400 mr-1"></i>ls -la</button>
@@ -570,6 +607,10 @@
 
       <!-- Terminal Window -->
       <div class="p-4 bg-slate-950 flex-1 overflow-hidden flex flex-col">
+        <div id="terminalEmptyState" class="terminal-empty-state hidden">
+          <i class="fa-solid fa-terminal text-slate-500 text-xl"></i>
+          <span data-i18n="terminal_empty">No terminal tabs open. Click New tab to start.</span>
+        </div>
         <div id="terminalWindow" class="terminal-window flex-1 min-h-[300px]"></div>
 
         <!-- xterm.js provides the shell prompt and keyboard input. -->
@@ -704,6 +745,31 @@
         <button class="btn-secondary text-xs py-2 px-4" onclick="UI.closeModal('deleteModal')" data-i18n="cancel">Hủy</button>
         <button class="btn-danger text-xs py-2 px-4" onclick="App.confirmDelete()">
           <i class="fa-solid fa-trash-can"></i> <span data-i18n="delete_btn_permanent">Xóa vĩnh viễn</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Port Tunnel Confirmation Modal -->
+  <div id="portTunnelConfirmModal" class="modal-overlay" onclick="if(event.target === this) App.resolveApplicationTunnelClose(false)">
+    <div class="modal-content max-w-md">
+      <div class="modal-header">
+        <h3 class="modal-title text-red-600">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span data-i18n="port_application_tunnel_title">Confirm Close Tunnel</span>
+        </h3>
+        <button class="modal-close" onclick="App.resolveApplicationTunnelClose(false)" aria-label="Cancel">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="portTunnelConfirmMessage" class="text-sm text-slate-600 leading-relaxed"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary text-xs py-2 px-4" onclick="App.resolveApplicationTunnelClose(false)" data-i18n="cancel">Cancel</button>
+        <button class="btn-danger text-xs py-2 px-4" onclick="App.resolveApplicationTunnelClose(true)">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+          <span data-i18n="port_tunnel_close">Close tunnel</span>
         </button>
       </div>
     </div>

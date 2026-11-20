@@ -89,12 +89,12 @@ class CloudflareTunnelService:
                     time.sleep(2 ** attempt)
         raise RuntimeError(f"Could not download Cloudflare Tunnel binary after 3 attempts: {last_error}")
 
-    def start_tunnel(self, port: int) -> Optional[str]:
+    def start_tunnel(self, port: int, quick: bool = False) -> Optional[str]:
         """Start cloudflared; only quick-tunnel URLs are verified from tunnel output."""
         self.ensure_binary()
         self.stop_tunnel()
         print(f"[*] Starting Cloudflare Tunnel for 127.0.0.1:{port}...")
-        if settings.TUNNEL_TOKEN:
+        if settings.TUNNEL_TOKEN and not quick:
             cmd = [str(self.binary_path), "tunnel", "run", "--token", settings.TUNNEL_TOKEN]
         else:
             cmd = [str(self.binary_path), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"]
@@ -119,7 +119,7 @@ class CloudflareTunnelService:
         self.reader_thread.start()
         self.public_url = None
         self.url_verified = False
-        deadline = time.monotonic() + (8 if settings.TUNNEL_TOKEN else 40)
+        deadline = time.monotonic() + (8 if settings.TUNNEL_TOKEN and not quick else 40)
         error_lines = []
         pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
         while time.monotonic() < deadline:
@@ -138,7 +138,7 @@ class CloudflareTunnelService:
                 self.public_url = match.group(0)
                 self.url_verified = True
                 return self.public_url
-        if settings.TUNNEL_TOKEN:
+        if settings.TUNNEL_TOKEN and not quick:
             if self.process.poll() is not None:
                 raise RuntimeError("Named Cloudflare Tunnel process exited: " + "\n".join(error_lines[-20:]))
             configured = settings.TUNNEL_URL

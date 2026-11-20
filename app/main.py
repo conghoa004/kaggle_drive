@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +11,19 @@ from app.routes.auth_routes import router as auth_router
 from app.routes.file_routes import router as file_router
 from app.routes.system_routes import router as system_router
 from app.routes.view_routes import router as view_router
+
 from app.routes.ide_routes import router as ide_router
+
+from app.services.port_service import port_manager
+
+
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        port_manager.stop_all()
+
 
 
 class RequestBodyLimitMiddleware:
@@ -102,7 +115,8 @@ def create_app() -> FastAPI:
         description="Modern File Server & Manager for Kaggle Working Directory",
         version="2.0.0",
         docs_url="/api/docs",
-        redoc_url=None
+        redoc_url=None,
+        lifespan=app_lifespan
     )
 
     app.add_middleware(

@@ -177,6 +177,18 @@ const API = {
   // System Endpoints
   getSystemStats() {
     return this.request("/api/system/stats");
+  },
+
+  getListeningPorts() {
+    return this.request("/api/system/ports");
+  },
+
+  startPortTunnel(port) {
+    return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "POST" });
+  },
+
+  stopPortTunnel(port) {
+    return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "DELETE" });
   }
 };
 
