@@ -142,6 +142,7 @@ class PortManager:
                 })
                 item["tunnel"] = self._tunnel_state(tunnel)
             for port, item in items.items():
+                item["is_application"] = port == settings.PORT
                 item.setdefault("tunnel", self._tunnel_state(self._active_tunnel(port)))
             return [items[port] for port in sorted(items)]
 

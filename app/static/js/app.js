@@ -1624,12 +1624,18 @@ const App = {
     const item = AppState.ports.find(entry => Number(entry.port) === port);
     if (!Number.isInteger(port) || !item) return;
 
+    const isClosing = Boolean(item.tunnel && item.tunnel.active);
+    if (isClosing && (item.is_application || port === 8000) &&
+        !window.confirm(t("port_application_tunnel_confirm", { port }))) {
+      return;
+    }
+
     const buttons = Array.from(document.querySelectorAll("[data-tunnel-port]"))
       .filter(button => Number(button.dataset.tunnelPort) === port);
     buttons.forEach(button => { button.disabled = true; });
 
     try {
-      if (item.tunnel && item.tunnel.active) {
+      if (isClosing) {
         await API.stopPortTunnel(port);
         UI.toast(t("port_tunnel_stopped", { port }), "success");
       } else {
