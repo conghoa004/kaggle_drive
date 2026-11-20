@@ -10,52 +10,6 @@ const Uploader = {
     this.setupFileInputs();
   },
 
-  async pickFolder() {
-    if (this.isUploading) {
-      UI.toast(t("upload_busy"), "warning");
-      return;
-    }
-    if (typeof window.showDirectoryPicker !== "function") {
-      const fallbackInput = document.getElementById("folderInput");
-      if (fallbackInput) fallbackInput.click();
-      return;
-    }
-
-    let files;
-    try {
-      const directory = await window.showDirectoryPicker({ id: "kaggle-cloud-drive-upload" });
-      files = await this.collectDirectoryFiles(directory, directory.name);
-    } catch (error) {
-      if (error && error.name === "AbortError") return;
-      UI.toast(error && error.message ? error.message : t("upload_error"), "error");
-      return;
-    }
-
-    if (files.length) {
-      try {
-        await this.uploadFilesList(files);
-      } catch (_) {
-        // The upload manager already reports upload failures to the user.
-      }
-    }
-  },
-
-  async collectDirectoryFiles(directoryHandle, relativeDirectory) {
-    const files = [];
-    for await (const entry of directoryHandle.values()) {
-      const relativePath = relativeDirectory + "/" + entry.name;
-      if (entry.kind === "directory") {
-        const nestedFiles = await this.collectDirectoryFiles(entry, relativePath);
-        for (const file of nestedFiles) files.push(file);
-      } else if (entry.kind === "file") {
-        const file = await entry.getFile();
-        file.relativeUploadPath = relativePath;
-        files.push(file);
-      }
-    }
-    return files;
-  },
-
   setupGlobalDragDrop() {
     const overlay = document.getElementById("dragOverlay");
     let dragCounter = 0;
@@ -142,7 +96,7 @@ const Uploader = {
     files.forEach((file) => {
       formData.append("files", file);
       // Pass relative path if uploaded via folder input
-      formData.append("relative_paths", file.relativeUploadPath || file.webkitRelativePath || "");
+      formData.append("relative_paths", file.webkitRelativePath || "");
     });
 
     return new Promise((resolve, reject) => {
@@ -208,7 +162,7 @@ const Uploader = {
           const blob = file.slice(offset, end);
           const formData = new FormData();
           formData.append("target_path", AppState.currentPath);
-          formData.append("relative_path", file.relativeUploadPath || file.webkitRelativePath || file.name);
+          formData.append("relative_path", file.webkitRelativePath || file.name);
           formData.append("upload_id", uploadId);
           formData.append("offset", String(offset));
           formData.append("total_size", String(file.size));

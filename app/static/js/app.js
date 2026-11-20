@@ -907,7 +907,7 @@ const App = {
           <span>${t("upload_file")}</span>
         </div>
       </button>
-      <button class="context-menu-item" onclick="App.hideContextMenu(); Uploader.pickFolder()">
+      <button class="context-menu-item" onclick="App.hideContextMenu(); document.getElementById('folderInput').click()">
         <div class="context-item-left">
           <span class="context-item-icon"><i class="fa-solid fa-folder-plus"></i></span>
           <span>${t("upload_folder")}</span>
