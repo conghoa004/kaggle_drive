@@ -1,10 +1,12 @@
 import os
 import re
+import json
 import queue
 import threading
 import time
 import platform
 import subprocess
+import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 from pathlib import Path
@@ -89,8 +91,50 @@ class CloudflareTunnelService:
                     time.sleep(2 ** attempt)
         raise RuntimeError(f"Could not download Cloudflare Tunnel binary after 3 attempts: {last_error}")
 
+    def _wait_for_public_health(self, public_url: str, timeout: int = 30) -> bool:
+        """Wait until the public tunnel serves this app's health endpoint."""
+        health_url = f"{public_url.rstrip('/')}/health"
+        deadline = time.monotonic() + timeout
+        last_error = "no response"
+
+        while time.monotonic() < deadline:
+            if not self.process or self.process.poll() is not None:
+                last_error = "tunnel process exited"
+                break
+
+            request = urllib.request.Request(
+                health_url,
+                headers={"User-Agent": "KaggleCloudDrive/2.0"},
+            )
+            remaining = max(0.1, deadline - time.monotonic())
+            try:
+                with urllib.request.urlopen(request, timeout=min(5, remaining)) as response:
+                    status = response.status
+                    body = response.read(4096)
+                if status == 200:
+                    try:
+                        health = json.loads(body)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        health = None
+                    if (
+                        isinstance(health, dict)
+                        and health.get("status") == "online"
+                        and health.get("service") == "Kaggle Cloud Drive"
+                    ):
+                        return True
+                    last_error = "health endpoint returned unexpected content"
+                else:
+                    last_error = f"health endpoint returned HTTP {status}"
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = str(exc)
+
+            time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+
+        print(f"[!] Public tunnel health check failed: {last_error}", flush=True)
+        return False
+
     def start_tunnel(self, port: int, quick: bool = False) -> Optional[str]:
-        """Start cloudflared; only quick-tunnel URLs are verified from tunnel output."""
+        """Start cloudflared and verify quick-tunnel readiness over public HTTP."""
         self.ensure_binary()
         self.stop_tunnel()
         print(f"[*] Starting Cloudflare Tunnel for 127.0.0.1:{port}...")
@@ -135,9 +179,14 @@ class CloudflareTunnelService:
             error_lines.append(line)
             match = pattern.search(line)
             if match:
-                self.public_url = match.group(0)
-                self.url_verified = True
-                return self.public_url
+                public_url = match.group(0)
+                self.public_url = public_url
+                print("[*] Tunnel URL received; checking public /health...", flush=True)
+                if self._wait_for_public_health(public_url):
+                    self.url_verified = True
+                    return self.public_url
+                self.stop_tunnel()
+                raise RuntimeError(f"Public health check timed out for {public_url}/health.")
         if settings.TUNNEL_TOKEN and not quick:
             if self.process.poll() is not None:
                 raise RuntimeError("Named Cloudflare Tunnel process exited: " + "\n".join(error_lines[-20:]))
