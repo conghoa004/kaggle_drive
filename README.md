@@ -106,26 +106,10 @@ print("[*] Starting Kaggle Cloud Drive...")
 !python start_server.py --foreground
 ```
 
-The foreground cell stays attached while the server runs. Keep it running while using the app; interrupt it to stop the server. Startup output includes the local/public URL and login credentials. If no password is configured, a random password is generated for that server process.
-
-To start the server in the background instead:
-
-```python
-!python start_server.py
-```
-
 The background launcher writes output to `server.log`. Stop it from another cell:
 
 ```python
 !python /kaggle/working/kaggle_drive/stop_server.py
-```
-
-To update an existing checkout:
-
-```python
-%cd /kaggle/working/kaggle_drive
-!git checkout main
-!git pull origin main
 ```
 
 ### Local development
