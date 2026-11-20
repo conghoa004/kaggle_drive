@@ -72,11 +72,38 @@ The default managed root is `/`. Use `--root` or `KAGGLE_DRIVE_ROOT` to limit th
 Turn on Internet in the Kaggle Notebook settings to use Cloudflare Tunnel and allow the runtime to download Cloudflared when needed. In a notebook cell:
 
 ```python
+import os
+
 %cd /kaggle/working
-!git clone --branch main https://github.com/conghoa004/kaggle_drive.git
+
+PROJECT_DIR = "/kaggle/working/kaggle_drive"
+
+# 1. Clone or update repository from GitHub
+if not os.path.isdir(PROJECT_DIR):
+    print("[*] Cloning repository from GitHub...")
+    !git clone -b coder https://github.com/conghoa004/kaggle_drive.git
+else:
+    print("[*] Repository exists -> Pulling latest changes...")
+    %cd /kaggle/working/kaggle_drive
+    !git pull
+
 %cd /kaggle/working/kaggle_drive
-!pip install -r requirements.txt
-!python start_server.py --foreground --lang vi
+
+# 2. Install dependencies
+print("[*] Installing dependencies...")
+!pip install -q -r requirements.txt
+
+# 3. Start the server in the background
+print("[*] Starting Kaggle Cloud Drive...")
+
+# Run with default settings (--lang en --username admin --password auto)
+# !python start_server.py
+
+# Optional: --lang vi|en|zh, --username <user>, --password <pass>
+# !python start_server.py --lang en --username admin --password your_password
+
+# Keep the notebook cell attached to the server and stream logs in real time:
+!python start_server.py --foreground
 ```
 
 The foreground cell stays attached while the server runs. Keep it running while using the app; interrupt it to stop the server. Startup output includes the local/public URL and login credentials. If no password is configured, a random password is generated for that server process.
@@ -84,7 +111,7 @@ The foreground cell stays attached while the server runs. Keep it running while 
 To start the server in the background instead:
 
 ```python
-!python start_server.py --lang vi
+!python start_server.py
 ```
 
 The background launcher writes output to `server.log`. Stop it from another cell:
