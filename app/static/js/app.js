@@ -1447,6 +1447,13 @@ const App = {
 
     try {
       const stats = await API.getSystemStats();
+      try {
+        const portResult = await API.getListeningPorts();
+        stats.ports = portResult.ports || [];
+      } catch (portsError) {
+        stats.ports = [];
+        stats.portsError = portsError.message;
+      }
       AppState.systemStats = stats;
 
       if (stats.disk) {
@@ -1512,6 +1519,31 @@ const App = {
     }
   },
 
+  async togglePortTunnel(portValue) {
+    const port = Number(portValue);
+    const ports = (AppState.systemStats && AppState.systemStats.ports) || [];
+    const item = ports.find(entry => Number(entry.port) === port);
+    if (!Number.isInteger(port) || !item) return;
+
+    const buttons = Array.from(document.querySelectorAll("[data-tunnel-port]"))
+      .filter(button => Number(button.dataset.tunnelPort) === port);
+    buttons.forEach(button => { button.disabled = true; });
+
+    try {
+      if (item.tunnel && item.tunnel.active) {
+        await API.stopPortTunnel(port);
+        UI.toast(t("port_tunnel_stopped", { port }), "success");
+      } else {
+        await API.startPortTunnel(port);
+        UI.toast(t("port_tunnel_started", { port }), "success");
+      }
+      await this.refreshSystemStats(false);
+    } catch (error) {
+      UI.toast(error.message || t("port_tunnel_error"), "error");
+      buttons.forEach(button => { button.disabled = false; });
+    }
+  },
+
   renderSystemStatsModal(stats) {
     const container = document.getElementById("systemStatsBody");
     if (!container || !stats) return;
@@ -1541,6 +1573,43 @@ const App = {
     const memP = getPercent(mem);
     const cpu = stats.cpu || {};
     const cpuP = getPercent(cpu);
+    const ports = Array.isArray(stats.ports) ? stats.ports : [];
+    const portCards = ports.map(port => {
+      const tunnelActive = Boolean(port.tunnel && port.tunnel.active);
+      const portDetails = [port.process || t("port_process_unknown"), port.address]
+        .filter(Boolean)
+        .map(value => UI.escape(value))
+        .join(" / ");
+      const tunnelUrl = tunnelActive && port.tunnel.url
+        ? '<a class="text-[11px] text-sky-700 hover:text-sky-900 underline truncate max-w-full" target="_blank" rel="noopener noreferrer" href="' + UI.escape(port.tunnel.url) + '">' + UI.escape(port.tunnel.url) + '</a>'
+        : "";
+      return '<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 bg-white">' +
+        '<div class="min-w-0">' +
+          '<div class="flex items-center gap-2"><span class="font-mono text-sm font-bold text-slate-800">:' + Number(port.port) + '</span>' +
+            '<span class="text-[10px] px-2 py-0.5 rounded-full ' + (tunnelActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500') + '">' +
+              t(tunnelActive ? "port_tunnel_active" : "port_tunnel_inactive") + '</span></div>' +
+          '<div class="text-[11px] text-slate-500 mt-1 truncate">' + portDetails + '</div>' +
+          (tunnelUrl ? '<div class="mt-1">' + tunnelUrl + '</div>' : "") +
+        '</div>' +
+        '<button type="button" data-tunnel-port="' + Number(port.port) + '" onclick="App.togglePortTunnel(' + Number(port.port) + ')" class="' +
+          (tunnelActive ? 'btn-secondary' : 'btn-primary') + ' w-full sm:w-auto text-xs py-2 px-3 shrink-0">' +
+          '<i class="fa-brands fa-cloudflare mr-1"></i> ' + t(tunnelActive ? "port_tunnel_close" : "port_tunnel_open") +
+        '</button>' +
+      '</div>';
+    }).join("");
+    const portManagerHtml =
+      '<section class="pt-4 border-t border-slate-200/80">' +
+        '<div class="flex flex-wrap items-center justify-between gap-2 mb-1">' +
+          '<h4 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-network-wired text-orange-500"></i>' + t("port_manager_title") + '</h4>' +
+          '<button class="btn-secondary text-[11px] py-1.5 px-2.5" onclick="App.refreshSystemStats(true)"><i class="fa-solid fa-rotate"></i> ' + t("port_manager_refresh") + '</button>' +
+        '</div>' +
+        '<p class="text-[11px] text-slate-500 mb-3">' + t("port_manager_note") + '</p>' +
+        (stats.portsError
+          ? '<div class="text-xs text-rose-600 p-3 rounded-xl bg-rose-50">' + t("port_manager_error", { msg: UI.escape(stats.portsError) }) + '</div>'
+          : ports.length
+            ? '<div class="space-y-2">' + portCards + '</div>'
+            : '<div class="text-xs text-slate-500 p-3 rounded-xl bg-slate-50 border border-slate-200">' + t("port_manager_empty") + '</div>') +
+      '</section>';
 
     // GPU Cards: keep VRAM values separate because devices do not share memory.
     const gpu = stats.gpu || { status: "query_error" };
@@ -1667,6 +1736,7 @@ const App = {
           </div>
           <span class="text-[11px] text-slate-400 font-mono flex items-center gap-1"><i class="fa-solid fa-folder-tree text-slate-400"></i> ${UI.escape(stats.root_dir || "/kaggle/working")}</span>
         </div>
+        ${portManagerHtml}
       </div>
     `;
   },

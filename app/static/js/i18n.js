@@ -230,6 +230,20 @@ const I18n = {
 
       // System Stats Modal
       stats_title: "Giám sát tài nguyên máy chủ",
+
+      port_manager_title: "Qu\u1ea3n l\u00fd port & Cloudflare Tunnel",
+      port_manager_refresh: "Qu\u00e9t l\u1ea1i",
+      port_manager_note: "Ch\u1ec9 d\u00f9ng Quick Tunnel v\u1edbi \u1ee9ng d\u1ee5ng web/HTTP. Ch\u1ec9 li\u1ec7t k\u00ea TCP port \u0111ang l\u1eafng nghe tr\u00ean m\u00e1y n\u00e0y. URL HTTPS t\u1ea1o ra c\u00f4ng khai; h\u00e3y b\u1ea3o \u0111\u1ea3m \u1ee9ng d\u1ee5ng \u0111\u00edch c\u00f3 x\u00e1c th\u1ef1c.",
+      port_manager_empty: "Kh\u00f4ng t\u00ecm th\u1ea5y TCP port c\u1ee5c b\u1ed9 n\u00e0o \u0111ang l\u1eafng nghe.",
+      port_manager_error: "Kh\u00f4ng th\u1ec3 \u0111\u1ecdc danh s\u00e1ch port: {msg}",
+      port_process_unknown: "Kh\u00f4ng r\u00f5 ti\u1ebfn tr\u00ecnh",
+      port_tunnel_active: "Tunnel \u0111ang m\u1edf",
+      port_tunnel_inactive: "Tunnel \u0111ang \u0111\u00f3ng",
+      port_tunnel_open: "M\u1edf tunnel",
+      port_tunnel_close: "\u0110\u00f3ng tunnel",
+      port_tunnel_started: "\u0110\u00e3 m\u1edf Cloudflare Tunnel cho port {port}.",
+      port_tunnel_stopped: "\u0110\u00e3 \u0111\u00f3ng Cloudflare Tunnel cho port {port}.",
+      port_tunnel_error: "Kh\u00f4ng th\u1ec3 thay \u0111\u1ed5i tr\u1ea1ng th\u00e1i tunnel.",
       stats_scanning: "Đang quét thông tin phần cứng Kaggle...",
       stats_refresh_btn: "Cập nhật",
       stats_refreshing: "Đang nạp...",
@@ -531,6 +545,20 @@ const I18n = {
 
       // System Stats Modal
       stats_title: "Server Resource Monitor",
+
+      port_manager_title: "Ports & Cloudflare Tunnel",
+      port_manager_refresh: "Rescan",
+      port_manager_note: "Use Quick Tunnels only for web/HTTP apps. Only TCP ports listening on this machine are listed. The HTTPS URL is public; make sure the target app has authentication.",
+      port_manager_empty: "No local TCP listening ports were found.",
+      port_manager_error: "Could not read the port list: {msg}",
+      port_process_unknown: "Unknown process",
+      port_tunnel_active: "Tunnel open",
+      port_tunnel_inactive: "Tunnel closed",
+      port_tunnel_open: "Open tunnel",
+      port_tunnel_close: "Close tunnel",
+      port_tunnel_started: "Cloudflare Tunnel opened for port {port}.",
+      port_tunnel_stopped: "Cloudflare Tunnel closed for port {port}.",
+      port_tunnel_error: "Could not change the tunnel state.",
       stats_scanning: "Scanning Kaggle hardware metrics...",
       stats_refresh_btn: "Refresh",
       stats_refreshing: "Loading...",
@@ -832,6 +860,20 @@ const I18n = {
 
       // System Stats Modal
       stats_title: "服务器硬件资源监控",
+
+      port_manager_title: "\u7aef\u53e3\u4e0e Cloudflare Tunnel",
+      port_manager_refresh: "\u91cd\u65b0\u626b\u63cf",
+      port_manager_note: "\u4ec5\u7528 Quick Tunnel \u8bbf\u95ee Web/HTTP \u5e94\u7528\u3002\u8fd9\u91cc\u53ea\u663e\u793a\u672c\u673a\u6b63\u5728\u76d1\u542c\u7684 TCP \u7aef\u53e3\u3002HTTPS \u5730\u5740\u4f1a\u516c\u5f00\u53ef\u8bbf\u95ee\uff1b\u8bf7\u786e\u4fdd\u76ee\u6807\u5e94\u7528\u5df2\u542f\u7528\u8eab\u4efd\u9a8c\u8bc1\u3002",
+      port_manager_empty: "\u672a\u53d1\u73b0\u6b63\u5728\u76d1\u542c\u7684\u672c\u5730 TCP \u7aef\u53e3\u3002",
+      port_manager_error: "\u65e0\u6cd5\u8bfb\u53d6\u7aef\u53e3\u5217\u8868\uff1a{msg}",
+      port_process_unknown: "\u672a\u77e5\u8fdb\u7a0b",
+      port_tunnel_active: "\u96a7\u9053\u5df2\u5f00\u542f",
+      port_tunnel_inactive: "\u96a7\u9053\u5df2\u5173\u95ed",
+      port_tunnel_open: "\u5f00\u542f\u96a7\u9053",
+      port_tunnel_close: "\u5173\u95ed\u96a7\u9053",
+      port_tunnel_started: "\u5df2\u4e3a\u7aef\u53e3 {port} \u5f00\u542f Cloudflare Tunnel\u3002",
+      port_tunnel_stopped: "\u5df2\u5173\u95ed\u7aef\u53e3 {port} \u7684 Cloudflare Tunnel\u3002",
+      port_tunnel_error: "\u65e0\u6cd5\u66f4\u6539\u96a7\u9053\u72b6\u6001\u3002",
       stats_scanning: "正在扫描 Kaggle 硬件状态...",
       stats_refresh_btn: "刷新",
       stats_refreshing: "刷新中...",

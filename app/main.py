@@ -10,6 +10,7 @@ from app.routes.auth_routes import router as auth_router
 from app.routes.file_routes import router as file_router
 from app.routes.system_routes import router as system_router
 from app.routes.view_routes import router as view_router
+from app.services.port_service import port_manager
 
 
 class RequestBodyLimitMiddleware:
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RequestBodyLimitMiddleware)
+    app.add_event_handler("shutdown", port_manager.stop_all)
 
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists():
