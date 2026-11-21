@@ -1619,13 +1619,15 @@ const App = {
           '<div class="text-xs text-slate-500 mt-1 truncate">' + portDetails + '</div>' +
           (tunnelUrl ? '<div class="mt-2">' + tunnelUrl + '</div>' : "") +
         '</div>' +
-        '<button type="button" data-tunnel-port="' + Number(port.port) + '" onclick="App.togglePortTunnel(' + Number(port.port) + ')" class="' +
-          (tunnelActive ? 'btn-secondary' : 'btn-primary') + ' w-full sm:w-auto text-xs py-2 px-3 shrink-0">' +
-          '<i class="fa-brands fa-cloudflare mr-1"></i> ' + t(tunnelActive ? "port_tunnel_close" : "port_tunnel_open") +
-        '</button>' +
-        '<button type="button" data-local-port="' + Number(port.port) + '" onclick="App.closeLocalPort(' + Number(port.port) + ')" class="btn-danger w-full sm:w-auto text-xs py-2 px-3 shrink-0">' +
-          '<i class="fa-solid fa-power-off mr-1"></i> ' + t("port_local_close") +
-        '</button>' +
+        '<div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">' +
+          '<button type="button" data-tunnel-port="' + Number(port.port) + '" onclick="App.togglePortTunnel(' + Number(port.port) + ')" class="' +
+            (tunnelActive ? 'btn-secondary' : 'btn-primary') + ' w-full sm:w-auto text-xs py-2 px-3">' +
+            '<i class="fa-brands fa-cloudflare mr-1"></i> ' + t(tunnelActive ? "port_tunnel_close" : "port_tunnel_open") +
+          '</button>' +
+          '<button type="button" data-local-port="' + Number(port.port) + '" onclick="App.closeLocalPort(' + Number(port.port) + ')" class="btn-danger w-full sm:w-auto text-xs py-2 px-3">' +
+            '<i class="fa-solid fa-power-off mr-1"></i> ' + t("port_local_close") +
+          '</button>' +
+        '</div>' +
       '</div>';
     }).join("");
     body.innerHTML = '<div class="space-y-2">' + portCards + '</div>';
