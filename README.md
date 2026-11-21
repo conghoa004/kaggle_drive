@@ -24,12 +24,12 @@ Folder selection uses the browser's directory upload input. Some browsers displa
 
 ### Ports Manager and Cloudflare Tunnel
 
-- Scan local TCP ports that are listening on an address reachable through `127.0.0.1`.
+- Scan local TCP ports that are listening on an address reachable through 127.0.0.1.
 - Start or stop an on-demand Cloudflare Quick Tunnel for a listed port and show its public URL.
-- Port 8000 is the Kaggle Cloud Drive web server by default. Closing its tunnel disconnects the current public URL; the UI asks for confirmation first.
+- Stop a local listener process from the port list; its active Cloudflare tunnel is stopped at the same time. The app confirms before stopping a process.
+- Port 8000 is the Kaggle Cloud Drive web server by default. Closing it stops the app and disconnects this session and its public URL.
 - Use Quick Tunnels for web/HTTP applications. A tunnel URL is public, so protect the target application with its own authentication when needed.
-- The application can also start a primary tunnel automatically. It uses a Quick Tunnel by default, or a named tunnel when `CLOUDFLARE_TUNNEL_TOKEN` is configured.
-
+- The application can also start a primary tunnel automatically. It uses a Quick Tunnel by default, or a named tunnel when CLOUDFLARE_TUNNEL_TOKEN is configured.
 ### Terminal
 
 - Open up to four terminal tabs. Each tab has its own Linux shell, working directory, output history, and WebSocket connection.

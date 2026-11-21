@@ -110,6 +110,62 @@ class PortManager:
                 return fallback
             raise RuntimeError(f"Could not inspect listening ports: {exc}") from exc
 
+    @staticmethod
+    def _listening_processes(port: int):
+        """Return safe-to-stop processes that own listeners reachable on localhost."""
+        try:
+            connections = psutil.net_connections(kind="inet")
+        except psutil.Error as exc:
+            raise RuntimeError(f"Could not inspect listener processes for port {port}: {exc}") from exc
+
+        found_listener = False
+        pids = set()
+        for connection in connections:
+            if connection.type != psutil.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
+                continue
+            local_address = connection.laddr
+            if not local_address:
+                continue
+            if hasattr(local_address, "ip"):
+                address, listening_port = local_address.ip, local_address.port
+            else:
+                address, listening_port = local_address[0], local_address[1]
+            if int(listening_port) != port or address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+                continue
+
+            found_listener = True
+            pid = getattr(connection, "pid", None)
+            if pid is None:
+                raise RuntimeError(f"Could not safely identify the process listening on port {port}.")
+            pids.add(int(pid))
+
+        if not found_listener:
+            raise ValueError(f"No local TCP service is listening on port {port}.")
+
+        try:
+            current_user = psutil.Process().username()
+        except psutil.Error as exc:
+            raise RuntimeError(f"Could not identify the current user: {exc}") from exc
+
+        processes = []
+        for pid in sorted(pids):
+            if pid <= 1:
+                raise PermissionError(f"Refusing to stop protected system process {pid}.")
+            try:
+                process = psutil.Process(pid)
+                owner = process.username()
+            except psutil.NoSuchProcess:
+                continue
+            except psutil.Error as exc:
+                raise RuntimeError(f"Could not inspect process {pid}: {exc}") from exc
+            if owner.casefold() != current_user.casefold():
+                raise PermissionError(f"Port {port} belongs to a process running as another user (PID {pid}).")
+            processes.append(process)
+
+        if not processes:
+            raise ValueError(f"No process is currently listening on port {port}.")
+        return processes
+
     def _active_tunnel(self, port: int) -> Optional[CloudflareTunnelService]:
         tunnel = self._tunnels.get(port)
         if tunnel and tunnel.process and tunnel.process.poll() is None:
@@ -183,6 +239,72 @@ class PortManager:
                 if isinstance(exc, RuntimeError):
                     raise
                 raise RuntimeError(f"Could not start Cloudflare Tunnel: {exc}") from exc
+
+    @staticmethod
+    def _schedule_process_stop(process):
+        """Delay stopping this server process so the HTTP response can be sent."""
+        def stop():
+            try:
+                if process.is_running():
+                    process.terminate()
+            except psutil.Error:
+                pass
+
+        timer = threading.Timer(1.5, stop)
+        timer.daemon = True
+        timer.start()
+
+    def close_local_port(self, port: int):
+        """Stop the local listener process and its tunnel, if one is active."""
+        if port < 1 or port > 65535:
+            raise ValueError("Port must be between 1 and 65535.")
+
+        with self._lock:
+            processes = self._listening_processes(port)
+            tunnel_active = self._active_tunnel(port) is not None
+            self.stop_tunnel(port)
+
+            own_pid = psutil.Process().pid
+            own_process = None
+            other_processes = []
+            failures = []
+            for process in processes:
+                if process.pid == own_pid:
+                    own_process = process
+                    continue
+                try:
+                    process.terminate()
+                    other_processes.append(process)
+                except psutil.NoSuchProcess:
+                    continue
+                except psutil.Error as exc:
+                    failures.append(f"PID {process.pid}: {exc}")
+
+            if other_processes:
+                try:
+                    _, alive = psutil.wait_procs(other_processes, timeout=3)
+                except psutil.Error as exc:
+                    failures.append(f"Could not wait for listener processes: {exc}")
+                    alive = other_processes
+                for process in alive:
+                    try:
+                        process.kill()
+                    except psutil.NoSuchProcess:
+                        continue
+                    except psutil.Error as exc:
+                        failures.append(f"PID {process.pid}: {exc}")
+                if alive:
+                    try:
+                        _, still_alive = psutil.wait_procs(alive, timeout=2)
+                        failures.extend(f"PID {process.pid} did not stop." for process in still_alive)
+                    except psutil.Error as exc:
+                        failures.append(f"Could not verify listener shutdown: {exc}")
+
+            if own_process:
+                self._schedule_process_stop(own_process)
+            if failures:
+                raise RuntimeError("Could not stop every listener process: " + "; ".join(failures))
+            return {"port": port, "closed": True, "tunnel_stopped": tunnel_active}
 
     def stop_tunnel(self, port: int):
         if port < 1 or port > 65535:

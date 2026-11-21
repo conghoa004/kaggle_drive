@@ -20,6 +20,7 @@ const AppState = {
 
 const App = {
   portTunnelConfirmResolver: null,
+  portLocalCloseResolver: null,
 
   init() {
     I18n.init();
@@ -1622,6 +1623,9 @@ const App = {
           (tunnelActive ? 'btn-secondary' : 'btn-primary') + ' w-full sm:w-auto text-xs py-2 px-3 shrink-0">' +
           '<i class="fa-brands fa-cloudflare mr-1"></i> ' + t(tunnelActive ? "port_tunnel_close" : "port_tunnel_open") +
         '</button>' +
+        '<button type="button" data-local-port="' + Number(port.port) + '" onclick="App.closeLocalPort(' + Number(port.port) + ')" class="btn-danger w-full sm:w-auto text-xs py-2 px-3 shrink-0">' +
+          '<i class="fa-solid fa-power-off mr-1"></i> ' + t("port_local_close") +
+        '</button>' +
       '</div>';
     }).join("");
     body.innerHTML = '<div class="space-y-2">' + portCards + '</div>';
@@ -1644,6 +1648,29 @@ const App = {
     const resolve = this.portTunnelConfirmResolver;
     this.portTunnelConfirmResolver = null;
     UI.closeModal("portTunnelConfirmModal");
+    if (resolve) resolve(Boolean(confirmed));
+  },
+
+  confirmLocalPortClose(port, processName, isApplication) {
+    return new Promise(resolve => {
+      if (this.portLocalCloseResolver) {
+        resolve(false);
+        return;
+      }
+      this.portLocalCloseResolver = resolve;
+      const message = document.getElementById("portLocalCloseMessage");
+      if (message) {
+        const key = isApplication ? "port_application_local_close_confirm" : "port_local_close_confirm";
+        message.textContent = t(key, { port, process: processName });
+      }
+      UI.openModal("portLocalCloseConfirmModal");
+    });
+  },
+
+  resolveLocalPortClose(confirmed) {
+    const resolve = this.portLocalCloseResolver;
+    this.portLocalCloseResolver = null;
+    UI.closeModal("portLocalCloseConfirmModal");
     if (resolve) resolve(Boolean(confirmed));
   },
 
@@ -1688,6 +1715,38 @@ const App = {
     }
   },
 
+
+  async closeLocalPort(portValue) {
+    const port = Number(portValue);
+    const item = AppState.ports.find(entry => Number(entry.port) === port);
+    if (!Number.isInteger(port) || !item) return;
+
+    const processName = item.process || t("port_process_unknown");
+    if (!(await this.confirmLocalPortClose(port, processName, Boolean(item.is_application)))) return;
+
+    const buttons = Array.from(document.querySelectorAll("[data-local-port]"))
+      .filter(button => Number(button.dataset.localPort) === port);
+    const originalButtonHtml = new Map(buttons.map(button => [button, button.innerHTML]));
+    buttons.forEach(button => {
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1" aria-hidden="true"></i> ' +
+        UI.escape(t("port_local_closing"));
+    });
+
+    try {
+      await API.closeLocalPort(port);
+      UI.toast(t("port_local_closed", { port }), "success");
+      if (!item.is_application) await this.refreshPortsPage(false);
+    } catch (error) {
+      UI.toast(error.message || t("port_local_close_error"), "error");
+      buttons.forEach(button => {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.innerHTML = originalButtonHtml.get(button) || "";
+      });
+    }
+  },
 
   renderSystemStatsModal(stats) {
     const container = document.getElementById("systemStatsBody");
