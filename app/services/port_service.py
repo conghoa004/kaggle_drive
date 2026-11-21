@@ -71,7 +71,7 @@ class PortManager:
             connections = psutil.net_connections(kind="inet")
             ports = {}
             for connection in connections:
-                if connection.type != psutil.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
+                if connection.type != socket.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
                     continue
                 local_address = connection.laddr
                 if not local_address:
@@ -196,7 +196,7 @@ class PortManager:
         unknown_pid = False
         pids = set()
         for connection in connections:
-            if connection.type != psutil.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
+            if connection.type != socket.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
                 continue
             local_address = connection.laddr
             if not local_address:
