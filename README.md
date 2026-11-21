@@ -41,7 +41,8 @@ The default managed root is `/`. Use `--root` or `KAGGLE_DRIVE_ROOT` to limit th
 
 - Scan local TCP listening ports that can be reached through `127.0.0.1`; display the port, address, process name when available, and tunnel state.
 - Start or stop an on-demand Cloudflare Quick Tunnel for a listed port.
-- Port 8000 is the web app's default port. Closing its tunnel disconnects the current public URL, so the UI asks for confirmation.
+- Stop a local listener process from the port list; its active Cloudflare tunnel is stopped at the same time. The app confirms before stopping a process.
+- Port 8000 is the web app's default port. Closing it stops Kaggle Cloud Drive and disconnects this session and its public URL.
 - Quick Tunnels are intended for web/HTTP applications. Tunnel URLs are public; enable authentication in the target application when it handles private data.
 - At startup, the app can create a primary tunnel automatically. It uses a Quick Tunnel unless a named tunnel token is configured.
 

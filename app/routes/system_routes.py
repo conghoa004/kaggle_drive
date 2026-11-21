@@ -43,6 +43,20 @@ def open_port_tunnel(request: Request, port: int):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+@router.delete("/ports/{port}")
+def close_local_port(request: Request, port: int):
+    """Stop a local port listener and close its associated tunnel."""
+    require_auth(request)
+    try:
+        return port_manager.close_local_port(port)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.delete("/ports/{port}/tunnel")
 def close_port_tunnel(request: Request, port: int):
     """Stop the Cloudflare tunnel associated with one local port."""

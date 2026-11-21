@@ -187,6 +187,10 @@ const API = {
     return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "POST" });
   },
 
+  closeLocalPort(port) {
+    return this.request("/api/system/ports/" + encodeURIComponent(port), { method: "DELETE" });
+  },
+
   stopPortTunnel(port) {
     return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "DELETE" });
   }
