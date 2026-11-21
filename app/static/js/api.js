@@ -189,10 +189,6 @@ const API = {
 
   stopPortTunnel(port) {
     return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "DELETE" });
-  },
-
-  stopLocalPort(port) {
-    return this.request("/api/system/ports/" + encodeURIComponent(port), { method: "DELETE" });
   }
 };
 
