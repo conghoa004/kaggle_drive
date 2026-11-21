@@ -2,8 +2,8 @@
 
 set -Eeuo pipefail
 
-LOG_FILE="/kaggle/working/kaggle_drive/mysql_phpmyadmin_install.log"
-CREDENTIAL_FILE="/root/phpmyadmin_credentials.txt"
+LOG_FILE="/kaggle/working/kaggle_drive/services/mysql/mysql_phpmyadmin_install.log"
+CREDENTIAL_FILE="/kaggle/working/kaggle_drive/services/mysql/phpmyadmin_credentials.txt"
 APACHE_PORT="8081"
 
 umask 077
