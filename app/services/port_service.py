@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 from pathlib import Path
@@ -111,14 +112,88 @@ class PortManager:
             raise RuntimeError(f"Could not inspect listening ports: {exc}") from exc
 
     @staticmethod
+    def _proc_listener_processes(port: int):
+        """Find listener PIDs from /proc when psutil cannot report them."""
+        proc_root = Path("/proc")
+        if not proc_root.is_dir():
+            return False, set(), False
+
+        found_listener = False
+        inodes = set()
+        for proc_path in (proc_root / "net" / "tcp", proc_root / "net" / "tcp6"):
+            try:
+                lines = proc_path.read_text(encoding="ascii").splitlines()
+            except OSError:
+                continue
+            is_ipv6 = proc_path.name.endswith("tcp6")
+            for line in lines[1:]:
+                fields = line.split()
+                if len(fields) < 10 or fields[3] != "0A":
+                    continue
+                try:
+                    raw_ip, raw_port = fields[1].split(":")
+                    if int(raw_port, 16) != port:
+                        continue
+                    address_bytes = bytes.fromhex(raw_ip)
+                    if is_ipv6:
+                        address_bytes = b"".join(
+                            address_bytes[index:index + 4][::-1]
+                            for index in range(0, 16, 4)
+                        )
+                        address = socket.inet_ntop(socket.AF_INET6, address_bytes)
+                    else:
+                        address = socket.inet_ntop(socket.AF_INET, address_bytes[::-1])
+                except (ValueError, OSError):
+                    continue
+
+                if address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+                    continue
+                found_listener = True
+                if fields[9] != "0":
+                    inodes.add(fields[9])
+
+        if not found_listener or not inodes:
+            return found_listener, set(), False
+
+        pids = set()
+        matched_inodes = set()
+        try:
+            process_dirs = list(proc_root.iterdir())
+        except OSError:
+            return found_listener, pids, False
+
+        for process_dir in process_dirs:
+            if not process_dir.name.isdigit():
+                continue
+            try:
+                descriptors = list((process_dir / "fd").iterdir())
+            except OSError:
+                continue
+            for descriptor in descriptors:
+                try:
+                    target = os.readlink(descriptor)
+                except OSError:
+                    continue
+                if target.startswith("socket:[") and target.endswith("]"):
+                    inode = target[8:-1]
+                    if inode in inodes:
+                        pids.add(int(process_dir.name))
+                        matched_inodes.add(inode)
+
+        return found_listener, pids, inodes.issubset(matched_inodes)
+
+    @staticmethod
     def _listening_processes(port: int):
         """Return safe-to-stop processes that own listeners reachable on localhost."""
+        net_error = None
         try:
             connections = psutil.net_connections(kind="inet")
         except psutil.Error as exc:
-            raise RuntimeError(f"Could not inspect listener processes for port {port}: {exc}") from exc
+            connections = []
+            net_error = exc
 
         found_listener = False
+        unknown_pid = False
         pids = set()
         for connection in connections:
             if connection.type != psutil.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
@@ -136,11 +211,22 @@ class PortManager:
             found_listener = True
             pid = getattr(connection, "pid", None)
             if pid is None:
-                raise RuntimeError(f"Could not safely identify the process listening on port {port}.")
-            pids.add(int(pid))
+                unknown_pid = True
+            else:
+                pids.add(int(pid))
+
+        proc_found, proc_pids, proc_complete = PortManager._proc_listener_processes(port)
+        found_listener = found_listener or proc_found
+        pids.update(proc_pids)
 
         if not found_listener:
+            if net_error:
+                raise RuntimeError(f"Could not inspect listener processes for port {port}: {net_error}") from net_error
             raise ValueError(f"No local TCP service is listening on port {port}.")
+        if unknown_pid and not proc_complete:
+            raise RuntimeError(f"Could not safely identify every process listening on port {port}.")
+        if not pids:
+            raise RuntimeError(f"Could not identify the process listening on port {port}.")
 
         try:
             current_user = psutil.Process().username()
@@ -250,7 +336,7 @@ class PortManager:
             except psutil.Error:
                 pass
 
-        timer = threading.Timer(1.5, stop)
+        timer = threading.Timer(3.0, stop)
         timer.daemon = True
         timer.start()
 

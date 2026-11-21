@@ -55,6 +55,12 @@ def close_local_port(request: Request, port: int):
         raise HTTPException(status_code=403, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Could not close local port %s", port)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not close local port ({type(exc).__name__}): {exc}",
+        ) from exc
 
 
 @router.delete("/ports/{port}/tunnel")
