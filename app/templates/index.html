@@ -775,6 +775,31 @@
     </div>
   </div>
 
+  <!-- Local Port Process Confirmation Modal -->
+  <div id="portLocalCloseConfirmModal" class="modal-overlay" onclick="if(event.target === this) App.resolveLocalPortClose(false)">
+    <div class="modal-content max-w-md">
+      <div class="modal-header">
+        <h3 class="modal-title text-red-600">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span data-i18n="port_local_close_title">Confirm Stop Local Process</span>
+        </h3>
+        <button class="modal-close" onclick="App.resolveLocalPortClose(false)" aria-label="Cancel">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="portLocalCloseConfirmMessage" class="text-sm text-slate-600 leading-relaxed"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary text-xs py-2 px-4" onclick="App.resolveLocalPortClose(false)" data-i18n="cancel">Cancel</button>
+        <button class="btn-danger text-xs py-2 px-4" onclick="App.resolveLocalPortClose(true)">
+          <i class="fa-solid fa-plug-circle-xmark"></i>
+          <span data-i18n="port_local_close">Close local port</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Compress Modal -->
   <div id="compressModal" class="modal-overlay">
     <div class="modal-content max-w-sm">

@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 from pathlib import Path
@@ -60,6 +61,7 @@ class PortManager:
                 "port": item["port"],
                 "address": ", ".join(sorted(item["addresses"])),
                 "process": "Unknown",
+                "can_stop": False,
             }
             for item in sorted(ports.values(), key=lambda value: value["port"])
         ]
@@ -85,10 +87,11 @@ class PortManager:
                     continue
 
                 port = int(port)
-                item = ports.setdefault(port, {"port": port, "addresses": set(), "processes": set()})
+                item = ports.setdefault(port, {"port": port, "addresses": set(), "processes": set(), "pids": set()})
                 item["addresses"].add(address)
                 pid = getattr(connection, "pid", None)
                 if pid:
+                    item["pids"].add(int(pid))
                     try:
                         name = psutil.Process(pid).name()
                     except (psutil.Error, OSError):
@@ -101,6 +104,11 @@ class PortManager:
                     "port": item["port"],
                     "address": ", ".join(sorted(item["addresses"])),
                     "process": ", ".join(sorted(item["processes"])) or "Unknown",
+                    "can_stop": (
+                        item["port"] != settings.PORT
+                        and len(item["pids"]) == 1
+                        and next(iter(item["pids"])) != os.getpid()
+                    ),
                 }
                 for item in sorted(ports.values(), key=lambda value: value["port"])
             ]
@@ -139,10 +147,12 @@ class PortManager:
                     "port": port,
                     "address": "",
                     "process": "Unknown",
+                    "can_stop": False,
                 })
                 item["tunnel"] = self._tunnel_state(tunnel)
             for port, item in items.items():
                 item["is_application"] = port == settings.PORT
+                item.setdefault("can_stop", False)
                 item.setdefault("tunnel", self._tunnel_state(self._active_tunnel(port)))
             return [items[port] for port in sorted(items)]
 
@@ -197,6 +207,74 @@ class PortManager:
             if tunnel:
                 tunnel.stop_tunnel()
             return {"port": port, "active": False, "url": None}
+
+    @staticmethod
+    def _listening_pids(port: int):
+        """Return the PIDs listening on a locally reachable TCP address for a port."""
+        try:
+            connections = psutil.net_connections(kind="inet")
+        except (psutil.Error, OSError) as exc:
+            raise RuntimeError(f"Could not inspect process ownership for port {port}: {exc}") from exc
+
+        pids = set()
+        for connection in connections:
+            if connection.type != psutil.SOCK_STREAM or connection.status != psutil.CONN_LISTEN:
+                continue
+            local_address = connection.laddr
+            if not local_address:
+                continue
+            if hasattr(local_address, "ip"):
+                address, local_port = local_address.ip, local_address.port
+            else:
+                address, local_port = local_address[0], local_address[1]
+            if int(local_port) != port or address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+                continue
+            pid = getattr(connection, "pid", None)
+            if not pid:
+                raise RuntimeError(f"Could not identify the process listening on port {port}.")
+            pids.add(int(pid))
+        return pids
+
+    def stop_local_port(self, port: int):
+        """Gracefully stop the single process that owns a local listening port."""
+        if port < 1 or port > 65535:
+            raise ValueError("Port must be between 1 and 65535.")
+        if port == settings.PORT:
+            raise ValueError("The Ports Manager cannot stop its own application port.")
+
+        with self._lock:
+            pids = self._listening_pids(port)
+            if not pids:
+                raise ValueError(f"No local TCP service is listening on port {port}.")
+            if len(pids) != 1:
+                raise ValueError(f"More than one process is listening on port {port}; it was left running.")
+
+            pid = next(iter(pids))
+            if pid == os.getpid():
+                raise ValueError("The Ports Manager cannot stop its own process.")
+
+            process_name = "Unknown"
+            try:
+                process = psutil.Process(pid)
+                process_name = process.name()
+                created_at = process.create_time()
+                if self._listening_pids(port) != {pid}:
+                    raise RuntimeError(f"Port {port} changed owners; no process was stopped.")
+                if process.create_time() != created_at:
+                    raise RuntimeError(f"Process ownership for port {port} changed; no process was stopped.")
+                process.terminate()
+                process.wait(timeout=5)
+            except psutil.TimeoutExpired as exc:
+                raise RuntimeError(f"Process {pid} did not stop within 5 seconds; it was not force-killed.") from exc
+            except psutil.NoSuchProcess:
+                pass
+            except psutil.Error as exc:
+                raise RuntimeError(f"Could not stop process {pid}: {exc}") from exc
+
+            if self._listening_pids(port):
+                raise RuntimeError(f"Process {pid} stopped, but port {port} is still occupied.")
+            self.stop_tunnel(port)
+            return {"port": port, "stopped": True, "process": process_name}
 
 
 port_manager = PortManager()

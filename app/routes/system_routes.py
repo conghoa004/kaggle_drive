@@ -53,6 +53,18 @@ def close_port_tunnel(request: Request, port: int):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.delete("/ports/{port}")
+def close_local_port(request: Request, port: int):
+    """Stop the process listening on one local TCP port."""
+    require_auth(request)
+    try:
+        return port_manager.stop_local_port(port)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.websocket("/terminal/ws")
 async def run_terminal_pty(websocket: WebSocket):
     """Open an authenticated interactive PTY session for the browser terminal."""
