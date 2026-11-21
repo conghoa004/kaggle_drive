@@ -120,6 +120,7 @@ fi
 
 # Configure homepage redirect
 cat > /etc/apache2/conf-available/homepage-redirect.conf <<'EOF'
+RedirectRelative On
 RedirectMatch 302 ^/$ /phpmyadmin/
 EOF
 
