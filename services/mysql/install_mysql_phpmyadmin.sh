@@ -2,8 +2,9 @@
 
 set -Eeuo pipefail
 
-LOG_FILE="/var/log/mysql_phpmyadmin_install.log"
+LOG_FILE="/kaggle/working/kaggle_drive/mysql_phpmyadmin_install.log"
 CREDENTIAL_FILE="/root/phpmyadmin_credentials.txt"
+APACHE_PORT="8081"
 
 umask 077
 
@@ -124,6 +125,36 @@ EOF
 
 a2enconf homepage-redirect
 
+# Move Apache's HTTP listener and default site to the selected port.
+APACHE_PORTS_CONF="/etc/apache2/ports.conf"
+APACHE_DEFAULT_SITE="/etc/apache2/sites-available/000-default.conf"
+
+if [ ! -f "$APACHE_PORTS_CONF" ] || [ ! -f "$APACHE_DEFAULT_SITE" ]; then
+    echo "Error: Apache port or default-site configuration was not found."
+    exit 1
+fi
+
+if grep -Eq "^[[:space:]]*Listen[[:space:]]+${APACHE_PORT}([[:space:]]|$)" "$APACHE_PORTS_CONF"; then
+    sed -i -E 's/^[[:space:]]*Listen[[:space:]]+80([[:space:]]|$)//' "$APACHE_PORTS_CONF"
+elif grep -Eq '^[[:space:]]*Listen[[:space:]]+80([[:space:]]|$)' "$APACHE_PORTS_CONF"; then
+    sed -i -E "s/^[[:space:]]*Listen[[:space:]]+80([[:space:]]|$)/Listen ${APACHE_PORT}/" "$APACHE_PORTS_CONF"
+else
+    echo "Error: Could not find an Apache Listen 80 directive."
+    exit 1
+fi
+
+if grep -Fq "<VirtualHost *:${APACHE_PORT}>" "$APACHE_DEFAULT_SITE"; then
+    if grep -Fq '<VirtualHost *:80>' "$APACHE_DEFAULT_SITE"; then
+        echo "Error: Default Apache site has duplicate HTTP virtual hosts."
+        exit 1
+    fi
+elif grep -Fq '<VirtualHost *:80>' "$APACHE_DEFAULT_SITE"; then
+    sed -i "s@<VirtualHost \*:80>@<VirtualHost *:${APACHE_PORT}>@" "$APACHE_DEFAULT_SITE"
+else
+    echo "Error: Could not find the default Apache virtual host on port 80."
+    exit 1
+fi
+
 # Verify phpMyAdmin directory
 if [ ! -d /usr/share/phpmyadmin ]; then
     echo "Error: phpMyAdmin directory not found."
@@ -209,7 +240,7 @@ Password: ${DB_PASSWORD}
 Host: localhost
 Port: 3306
 
-phpMyAdmin URL: http://localhost/phpmyadmin
+phpMyAdmin URL: http://localhost:${APACHE_PORT}/phpmyadmin
 EOF
 
 chmod 600 "$CREDENTIAL_FILE"
@@ -264,8 +295,8 @@ fi
 echo ""
 echo "ACCESS URLS"
 echo "-----------------------------------------"
-echo "Homepage: http://localhost"
-echo "phpMyAdmin: http://localhost/phpmyadmin"
+echo "Homepage: http://localhost:${APACHE_PORT}"
+echo "phpMyAdmin: http://localhost:${APACHE_PORT}/phpmyadmin"
 
 echo ""
 echo "DATABASE INFORMATION"
