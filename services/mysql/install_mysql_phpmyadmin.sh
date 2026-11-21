@@ -166,6 +166,7 @@ echo "[8/9] Starting MySQL and creating database user..."
 # Prepare runtime directories
 mkdir -p /run/mysqld
 chown mysql:mysql /run/mysqld
+chmod 755 /run/mysqld
 
 # Start MySQL using service
 if ! service mysql start; then
