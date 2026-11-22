@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-CREDENTIAL_FILE=/kaggle/working/kaggle_drive/services/mysql/phpmyadmin_credentials.txt
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+CREDENTIAL_FILE="$SCRIPT_DIR/tmp/phpmyadmin_credentials.txt"
 PURGE_DATA=false
 
 for arg in "$@"; do
@@ -41,7 +42,6 @@ if [[ "$PURGE_DATA" == true ]]; then
     fi
 fi
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 STOP_SCRIPT="$SCRIPT_DIR/stop_mysql_phpmyadmin.sh"
 
 if [[ ! -f "$STOP_SCRIPT" ]]; then

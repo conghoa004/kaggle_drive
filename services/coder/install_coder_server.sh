@@ -6,6 +6,8 @@ set -Eeuo pipefail
 # Configuration
 # ==========================================
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+TMP_DIR="$SCRIPT_DIR/tmp"
 PORT="${CODE_SERVER_PORT:-8082}"
 WORKSPACE="${KAGGLE_WORKING_DIR:-/workspaces}"
 
@@ -14,7 +16,8 @@ STATE_DIR="${CODE_SERVER_STATE_DIR:-$HOME/.local/state/kaggle-code-server}"
 
 CONFIG_FILE="$STATE_DIR/config.yaml"
 PID_FILE="$STATE_DIR/code-server.pid"
-LOG_FILE="./code-server.log"
+CREDENTIAL_FILE="$TMP_DIR/credentials.txt"
+LOG_FILE="$TMP_DIR/code-server.log"
 
 HEALTH_URL="http://127.0.0.1:${PORT}/healthz"
 
@@ -40,7 +43,7 @@ find_code_server() {
 }
 
 check_dependencies() {
-    for cmd in curl bash; do
+    for cmd in curl bash openssl sed head tr setsid; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo "Missing dependency: $cmd"
             exit 1
@@ -153,7 +156,15 @@ generate_config() {
     chmod 700 "$STATE_DIR"
 
     local password
-    password="$(openssl rand -hex 24)"
+    password=""
+
+    if [[ -f "$CONFIG_FILE" ]]; then
+        password="$(sed -n 's/^password: //p' "$CONFIG_FILE" | head -n 1)"
+    fi
+
+    if [[ -z "$password" ]]; then
+        password="$(openssl rand -hex 24)"
+    fi
 
     cat > "$CONFIG_FILE" <<EOF
 bind-addr: 127.0.0.1:${PORT}
@@ -163,12 +174,32 @@ cert: false
 EOF
 
     chmod 600 "$CONFIG_FILE"
+    write_credentials "$password"
+}
+
+write_credentials() {
+    local password="$1"
+
+    mkdir -p "$TMP_DIR"
+    chmod 700 "$TMP_DIR"
+
+    (
+        umask 077
+        cat > "$CREDENTIAL_FILE" <<EOF
+code-server login
+URL: http://127.0.0.1:${PORT}
+Workspace: ${WORKSPACE}
+Password: ${password}
+EOF
+    )
+    chmod 600 "$CREDENTIAL_FILE"
 }
 
 print_connection_details() {
     local password
 
     password="$(sed -n 's/^password: //p' "$CONFIG_FILE" | head -n 1)"
+    write_credentials "$password"
 
     echo
     echo "======================================================"
@@ -177,6 +208,7 @@ print_connection_details() {
     echo "Local URL : http://127.0.0.1:${PORT}"
     echo "Workspace : $WORKSPACE"
     echo "Password  : $password"
+    echo "Login file: $CREDENTIAL_FILE"
     echo "Log file  : $LOG_FILE"
     echo "======================================================"
     echo
@@ -193,7 +225,8 @@ start_code_server() {
         return 1
     fi
 
-    mkdir -p "$LOCAL_BIN" "$STATE_DIR" "$WORKSPACE"
+    mkdir -p "$LOCAL_BIN" "$STATE_DIR" "$TMP_DIR" "$WORKSPACE"
+    chmod 700 "$TMP_DIR"
 
     install_code_server
     generate_config
@@ -255,7 +288,7 @@ stop_server() {
             kill -KILL "$SERVER_PID" 2>/dev/null || true
     fi
 
-    rm -f "$PID_FILE" "$CONFIG_FILE"
+    rm -f "$PID_FILE"
 
     log "code-server stopped."
 }

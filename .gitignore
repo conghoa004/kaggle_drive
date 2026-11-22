@@ -37,6 +37,8 @@ server.pid
 # Workspace storage (when testing locally)
 workspace_data/
 workspace/
+/services/coder/tmp/
+/services/mysql/tmp/
 .cloudflared_bin/
 /kaggle/
 

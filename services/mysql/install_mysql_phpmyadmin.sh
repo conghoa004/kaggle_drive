@@ -2,7 +2,8 @@
 
 set -Eeuo pipefail
 
-BASE_DIR="/kaggle/working/kaggle_drive/services/mysql"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+BASE_DIR="$SCRIPT_DIR"
 TMP_DIR="$BASE_DIR/tmp"
 
 LOG_FILE="$TMP_DIR/mysql_phpmyadmin_install.log"
