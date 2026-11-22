@@ -8,13 +8,7 @@ set -u
 
 EXTENSIONS=(
     "ms-python.python"
-    "ms-python.vscode-pylance"
-    "dbaeumer.vscode-eslint"
-    "esbenp.prettier-vscode"
-    "bmewburn.vscode-intelephense-client"
-    "mtxr.sqltools"
-    "ms-azuretools.vscode-docker"
-    "eamodio.gitlens"
+    "ms-toolsai.jupyter"
 )
 
 # ==========================================
