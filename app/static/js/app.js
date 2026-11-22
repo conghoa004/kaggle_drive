@@ -279,7 +279,9 @@ const App = {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
-    this.setActiveNavigation("navStorage");
+    const normalizedPath = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    const isServicesPath = normalizedPath === "services" || normalizedPath.startsWith("services/");
+    this.setActiveNavigation(isServicesPath ? "navServices" : "navStorage");
     AppState.currentPath = path;
     try {
       localStorage.setItem("kaggle_drive_current_path", path);
