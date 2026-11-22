@@ -40,7 +40,7 @@ def get_service_credentials(request: Request, response: Response, service_id: st
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc).strip("'")) from exc
     if credentials is None:
-        raise HTTPException(status_code=404, detail="Service login information is not available.")
+        raise HTTPException(status_code=404, detail="Service information is not available.")
     return {"credentials": credentials}
 
 

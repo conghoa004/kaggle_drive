@@ -18,14 +18,14 @@ fi
 for cmd in mysql mysqladmin service apache2ctl pgrep; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "ERROR: Required command not found: $cmd"
-        echo "Run install_mysql_phpmyadmin.sh first."
+        echo "Run install.sh first."
         exit 1
     fi
 done
 
 if [[ ! -d /usr/share/phpmyadmin ]]; then
     echo "ERROR: phpMyAdmin is not installed."
-    echo "Run install_mysql_phpmyadmin.sh first."
+    echo "Run install.sh first."
     exit 1
 fi
 
@@ -107,7 +107,7 @@ if [[ -f "$CREDENTIAL_FILE" ]]; then
 else
     echo
     echo "Administrator credentials file not found: $CREDENTIAL_FILE"
-    echo "Run install_mysql_phpmyadmin.sh to create the admin account."
+    echo "Run install.sh to create the admin account."
 fi
 
 echo

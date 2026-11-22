@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 TMP_DIR="$SCRIPT_DIR/tmp"
 CREDENTIAL_FILE="$TMP_DIR/phpmyadmin_credentials.txt"
+INFO_FILE="$TMP_DIR/info.txt"
 PURGE_DATA=false
 
 for arg in "$@"; do
@@ -12,7 +13,7 @@ for arg in "$@"; do
             PURGE_DATA=true
             ;;
         -h|--help)
-            echo "Usage: bash uninstall_mysql_phpmyadmin.sh [--purge-data]"
+            echo "Usage: bash uninstall.sh [--purge-data]"
             echo "Default: remove packages and preserve MySQL data and credentials."
             echo "--purge-data: also delete /var/lib/mysql and the generated credentials file."
             exit 0
@@ -43,7 +44,7 @@ if [[ "$PURGE_DATA" == true ]]; then
     fi
 fi
 
-STOP_SCRIPT="$SCRIPT_DIR/stop_mysql_phpmyadmin.sh"
+STOP_SCRIPT="$SCRIPT_DIR/stop.sh"
 
 if [[ ! -f "$STOP_SCRIPT" ]]; then
     echo "ERROR: Stop script not found: $STOP_SCRIPT"
@@ -111,7 +112,7 @@ fi
 if [[ "$PURGE_DATA" == true ]]; then
     echo "Deleting MySQL database files and generated credentials..."
     rm -rf -- /var/lib/mysql /var/log/mysql
-    rm -f -- /var/log/mysql_safe.log "$CREDENTIAL_FILE"
+    rm -f -- /var/log/mysql_safe.log "$CREDENTIAL_FILE" "$INFO_FILE"
     echo "Database data and generated credentials removed."
 else
     echo "MySQL data was preserved at /var/lib/mysql (if present)."

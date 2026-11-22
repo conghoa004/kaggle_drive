@@ -8,6 +8,7 @@ TMP_DIR="$BASE_DIR/tmp"
 
 LOG_FILE="$TMP_DIR/mysql_phpmyadmin_install.log"
 CREDENTIAL_FILE="$TMP_DIR/phpmyadmin_credentials.txt"
+INFO_FILE="$TMP_DIR/info.txt"
 
 APACHE_PORT="8081"
 INSTALL_ONLY=false
@@ -18,7 +19,7 @@ for arg in "$@"; do
             INSTALL_ONLY=true
             ;;
         -h|--help)
-            echo "Usage: bash install_mysql_phpmyadmin.sh [--install-only]"
+            echo "Usage: bash install.sh [--install-only]"
             exit 0
             ;;
         *)
@@ -278,6 +279,17 @@ EOF
 
 chmod 600 "$CREDENTIAL_FILE"
 
+cat > "$INFO_FILE" <<EOF
+name:MySQL + phpMyAdmin
+description:MySQL database with phpMyAdmin
+url:http://localhost:${APACHE_PORT}/phpmyadmin
+host:localhost
+port:3306
+username:${DB_USER}
+password:${DB_PASSWORD}
+EOF
+chmod 600 "$INFO_FILE"
+
 echo "MySQL administrator account created."
 
 echo "[9/9] Starting Apache..."
@@ -357,6 +369,6 @@ echo "========================================="
 
 if [[ "$INSTALL_ONLY" == true ]]; then
     echo "Stopping MySQL and Apache after installation..."
-    bash "$SCRIPT_DIR/stop_mysql_phpmyadmin.sh"
+    bash "$SCRIPT_DIR/stop.sh"
     echo "Installation complete. Services are stopped; start them from the Services store."
 fi

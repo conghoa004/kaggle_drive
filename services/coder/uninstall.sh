@@ -12,7 +12,7 @@ PURGE_USER_DATA=false
 
 usage() {
     cat <<EOF
-Usage: bash uninstall_coder_server.sh [--purge-user-data]
+Usage: bash uninstall.sh [--purge-user-data]
 
 Uninstalls the user-local code-server installation and removes its login files.
 Workspace and code-server settings/extensions are kept by default.
@@ -61,7 +61,7 @@ if [[ "$PURGE_USER_DATA" == true ]]; then
 fi
 
 echo "Stopping code-server if it is running..."
-bash "$SCRIPT_DIR/stop_coder_server.sh"
+bash "$SCRIPT_DIR/stop.sh"
 
 if [[ -e "$LOCAL_BIN/code-server" || -L "$LOCAL_BIN/code-server" ]]; then
     rm -f "$LOCAL_BIN/code-server"
@@ -74,7 +74,8 @@ fi
 rm -f \
     "$STATE_DIR/config.yaml" \
     "$STATE_DIR/code-server.pid" \
-    "$TMP_DIR/credentials.txt"
+    "$TMP_DIR/credentials.txt" \
+    "$TMP_DIR/info.txt"
 
 if [[ -d "$TMP_DIR" ]]; then
     find "$TMP_DIR" -maxdepth 1 -type f -name '*.log' -delete

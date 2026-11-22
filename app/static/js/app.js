@@ -1676,30 +1676,6 @@ const App = {
       return;
     }
 
-    const presentation = {
-      mysql: {
-        name: "services_mysql_name",
-        description: "services_mysql_description",
-        details: "services_mysql_details",
-        icon: "fa-database",
-        iconClass: "bg-orange-50 text-orange-600",
-        accent: "border-orange-100"
-      },
-      "code-server": {
-        name: "services_coder_name",
-        description: "services_coder_description",
-        details: "services_coder_details",
-        iconHtml: '<img src="https://code.visualstudio.com/assets/branding/code-stable.png" class="w-8 h-8 object-contain" alt="" onerror="this.hidden=true;this.nextElementSibling.classList.remove(&quot;hidden&quot;)"><i class="fa-solid fa-laptop-code text-blue-600 text-xl hidden"></i>',
-        iconClass: "bg-blue-50",
-        accent: "border-indigo-100"
-      }
-    };
-    const componentNames = {
-      mysql: "services_component_mysql",
-      apache: "services_component_apache",
-      phpmyadmin: "services_component_phpmyadmin",
-      "code-server": "services_component_code_server"
-    };
     const actionIcons = {
       install: "fa-download",
       start: "fa-play",
@@ -1708,70 +1684,60 @@ const App = {
     };
 
     const cards = AppState.services.map(service => {
-      const view = presentation[service.id];
-      if (!view) return "";
+      const serviceIdArg = UI.escape(JSON.stringify(service.id));
+      const serviceName = UI.escape(service.name || service.id);
+      const description = service.description
+        ? '<p class="text-xs leading-5 text-slate-500 mt-1.5">' + UI.escape(service.description) + '</p>'
+        : "";
       const task = AppState.serviceTasks[service.id] || service.task;
       const busy = Boolean(task && task.status === "running");
       const statusText = !service.supported
         ? t("services_unsupported")
         : busy
           ? t("services_action_busy", { action: t("services_action_" + task.action).toLowerCase() })
-          : service.running
-            ? t("services_running")
-            : service.active
-              ? t("services_partial")
-              : service.installed && !service.complete
-                ? t("services_partial_install")
-              : service.installed
-                ? t("services_installed")
-                : t("services_not_installed");
-      const statusClass = busy || service.running
+          : service.info_available
+            ? t("services_info_available")
+            : t("services_info_missing");
+      const statusClass = busy
         ? "bg-emerald-50 text-emerald-700"
-        : service.active || (service.installed && !service.complete)
-          ? "bg-amber-50 text-amber-700"
-          : service.installed
-            ? "bg-slate-100 text-slate-600"
-            : "bg-cyan-50 text-cyan-700";
-      const componentBadges = Object.entries(service.components || {})
-        .filter(([key]) => key !== "active")
-        .map(([key, active]) => '<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-semibold ' +
-          (active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500") + '"><span class="w-1.5 h-1.5 rounded-full ' +
-          (active ? "bg-emerald-500" : "bg-slate-300") + '"></span>' + t(componentNames[key] || key) + '</span>')
-        .join("");
-      const credentialsButton = '<button type="button" onclick="App.openServiceCredentials(\'' + service.id + '\')" ' +
-        (service.credentials_available && !busy ? "" : "disabled") +
-        ' title="' + UI.escape(service.credentials_available ? t("services_credentials_title") : t("services_credentials_missing")) + '"' +
-        ' class="btn-secondary text-xs py-2 px-3 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">' +
-        '<i class="fa-solid fa-key text-amber-500"></i><span>' + t("services_credentials_title") + '</span></button>';
+        : service.info_available
+          ? "bg-cyan-50 text-cyan-700"
+          : "bg-slate-100 text-slate-500";
 
-      const actionButton = (action, enabled, style) => '<button type="button" onclick="App.runServiceAction(\'' + service.id + '\', \'' + action + '\')" ' +
-        (enabled ? "" : "disabled") + ' class="' + style + ' disabled:opacity-45 disabled:cursor-not-allowed w-full text-xs py-2 px-2.5 justify-center">' +
-        '<i class="fa-solid ' + actionIcons[action] + '"></i><span>' + t("services_action_" + action) + '</span></button>';
+      const infoButton = '<button type="button" onclick="App.openServiceCredentials(' + serviceIdArg + ')" ' +
+        (service.info_available && !busy ? "" : "disabled") +
+        ' title="' + UI.escape(service.info_available ? t("services_credentials_title") : t("services_credentials_missing")) + '"' +
+        ' class="btn-secondary text-xs py-2 px-3 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">' +
+        '<i class="fa-solid fa-circle-info text-amber-500"></i><span>' + t("services_credentials_title") + '</span></button>';
+
+      const actionButton = action => {
+        const enabled = service.supported && !busy && Boolean(service.actions && service.actions[action]);
+        return '<button type="button" onclick="App.runServiceAction(' + serviceIdArg + ', \'' + action + '\')" ' +
+          (enabled ? "" : "disabled") + ' class="btn-' + (action === "install" ? "primary" : action === "uninstall" ? "danger" : "secondary") +
+          ' flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed w-full text-xs py-2 px-2.5 justify-center">' +
+          '<i class="fa-solid ' + actionIcons[action] + '"></i><span>' + t("services_action_" + action) + '</span></button>';
+      };
 
       const failedNotice = task && task.status === "failed"
         ? '<p class="text-[11px] text-rose-600 mt-3">' + t("services_action_failed", { code: Number(task.return_code || 1) }) + '</p>' +
           (task.log_file ? '<p class="text-[10px] text-slate-500 mt-1 break-all">' + t("services_action_log_file", { path: UI.escape(task.log_file) }) + '</p>' : "")
         : "";
-      return '<article class="rounded-2xl border ' + view.accent + ' bg-white shadow-sm hover:shadow-md transition overflow-hidden">' +
+
+      return '<article class="rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition overflow-hidden">' +
         '<div class="p-4 sm:p-5">' +
           '<div class="flex items-start gap-3">' +
-            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg ' + view.iconClass + '">' +
-              (view.iconHtml || '<i class="fa-solid ' + view.icon + '"></i>') + '</div>' +
+            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg bg-cyan-50 text-cyan-600"><i class="fa-solid fa-cube"></i></div>' +
             '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2">' +
-              '<h2 class="font-bold text-slate-800">' + t(view.name) + '</h2>' +
+              '<h2 class="font-bold text-slate-800">' + serviceName + '</h2>' +
               '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + statusClass + '">' +
                 (busy ? '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>' : '') + statusText + '</span>' +
-            '</div><p class="text-xs leading-5 text-slate-500 mt-1.5">' + t(view.description) + '</p></div>' +
+            '</div>' + description + '<p class="text-[10px] font-mono text-slate-400 mt-1">' + UI.escape(service.id) + '</p></div>' +
           '</div>' +
-          '<div class="flex flex-wrap items-center gap-2 mt-4"><span class="text-[11px] font-mono text-slate-500">' + t(view.details) + '</span>' + componentBadges + '</div>' +
-          '<div class="mt-4">' + credentialsButton + '</div>' +
+          '<div class="mt-4">' + infoButton + '</div>' +
           failedNotice +
         '</div>' +
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50/80 border-t border-slate-100">' +
-          actionButton("install", service.supported && !busy && !service.complete, "btn-primary flex items-center gap-1.5") +
-          actionButton("start", service.supported && !busy && service.complete && !service.running, "btn-secondary flex items-center gap-1.5") +
-          actionButton("stop", service.supported && !busy && service.active, "btn-secondary flex items-center gap-1.5") +
-          actionButton("uninstall", service.supported && !busy && (service.installed || service.active), "btn-danger flex items-center gap-1.5") +
+          ["install", "start", "stop", "uninstall"].map(actionButton).join("") +
         '</div>' +
       '</article>';
     }).join("");
@@ -1805,8 +1771,9 @@ const App = {
     if (!data) return;
     const title = document.getElementById("serviceCredentialsTitle");
     const body = document.getElementById("serviceCredentialsBody");
-    const serviceName = t(data.serviceId === "mysql" ? "services_mysql_name" : "services_coder_name");
-    if (title) title.textContent = t("services_credentials_title") + " — " + serviceName;
+    const service = AppState.services.find(item => item.id === data.serviceId);
+    const serviceName = service ? service.name || service.id : data.serviceId;
+    if (title) title.textContent = t("services_credentials_title") + " " + String.fromCharCode(0x2014) + " " + serviceName;
     if (!body) return;
 
     if (data.loading) {
@@ -1820,24 +1787,30 @@ const App = {
     }
 
     const credentials = data.credentials || {};
-    const fields = [
-      ["url", "services_credential_url"],
-      ["username", "services_credential_username"],
-      ["password", "services_credential_password"],
-      ["host", "services_credential_host"],
-      ["port", "services_credential_port"],
-      ["workspace", "services_credential_workspace"]
-    ].filter(([key]) => credentials[key]);
-
+    const labels = {
+      url: "services_credential_url",
+      username: "services_credential_username",
+      user: "services_credential_username",
+      password: "services_credential_password",
+      host: "services_credential_host",
+      port: "services_credential_port",
+      workspace: "services_credential_workspace"
+    };
+    const fields = Object.entries(credentials);
     if (!fields.length) {
       body.innerHTML = '<div class="text-sm text-slate-500 py-2">' + t("services_credentials_missing") + '</div>';
       return;
     }
 
     body.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
-      fields.map(([key, label]) => '<div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
-        '<div class="text-[11px] font-semibold text-slate-500 mb-1">' + t(label) + '</div>' +
-        '<div class="text-sm font-mono text-slate-800 break-all select-all cursor-text">' + UI.escape(String(credentials[key])) + '</div></div>').join("") +
+      fields.map(([key, value]) => {
+        const label = labels[key.toLowerCase()]
+          ? t(labels[key.toLowerCase()])
+          : key.replace(/[_-]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+        return '<div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
+          '<div class="text-[11px] font-semibold text-slate-500 mb-1">' + UI.escape(label) + '</div>' +
+          '<div class="text-sm font-mono text-slate-800 break-all select-all cursor-text">' + UI.escape(String(value)) + '</div></div>';
+      }).join("") +
       '</div>';
   },
 
@@ -1848,7 +1821,7 @@ const App = {
   async runServiceAction(serviceId, action) {
     const service = AppState.services.find(item => item.id === serviceId);
     if (!service) return;
-    const serviceName = t(serviceId === "mysql" ? "services_mysql_name" : "services_coder_name");
+    const serviceName = service.name || service.id;
     if (action === "uninstall" && !(await UI.confirm({
       title: t("services_uninstall_title"),
       message: t("services_uninstall_confirm", { name: serviceName }),

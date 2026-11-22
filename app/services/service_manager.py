@@ -8,27 +8,11 @@ from pathlib import Path
 
 
 _SERVICES_ROOT = Path(__file__).resolve().parents[2] / "services"
-_SERVICE_DEFINITIONS = {
-    "mysql": {
-        "folders": ("mysql",),
-        "credentials_file": "tmp/phpmyadmin_credentials.txt",
-        "scripts": {
-            "install": "install_mysql_phpmyadmin.sh",
-            "start": "start_mysql_phpmyadmin.sh",
-            "stop": "stop_mysql_phpmyadmin.sh",
-            "uninstall": "uninstall_mysql_phpmyadmin.sh",
-        },
-    },
-    "code-server": {
-        "folders": ("coder", "vs_code"),
-        "credentials_file": "tmp/credentials.txt",
-        "scripts": {
-            "install": "install_coder_server.sh",
-            "start": "start_coder_server.sh",
-            "stop": "stop_coder_server.sh",
-            "uninstall": "uninstall_coder_server.sh",
-        },
-    },
+_ACTIONS = {
+    "install": "install.sh",
+    "start": "start.sh",
+    "stop": "stop.sh",
+    "uninstall": "uninstall.sh",
 }
 
 _TASKS = {}
@@ -38,96 +22,62 @@ _IS_LINUX = sys.platform.startswith("linux")
 
 
 def _service_directory(service_id: str) -> Path | None:
-    definition = _SERVICE_DEFINITIONS[service_id]
-    for folder in definition["folders"]:
-        candidate = _SERVICES_ROOT / folder
-        if candidate.is_dir():
-            return candidate
-    return None
+    if (
+        not service_id
+        or Path(service_id).name != service_id
+        or "/" in service_id
+        or "\\" in service_id
+    ):
+        return None
 
-
-def _run_check(command: list[str], timeout: float = 2.0) -> bool:
+    candidate = _SERVICES_ROOT / service_id
+    if candidate.is_symlink() or not candidate.is_dir():
+        return None
     try:
-        return subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
-        ).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+        if candidate.resolve().parent != _SERVICES_ROOT.resolve():
+            return None
+    except OSError:
+        return None
+    return candidate
 
 
-def _mysql_state() -> tuple[bool, bool, bool, dict[str, bool]]:
-    mysql_installed = bool(shutil.which("mysqladmin"))
-    apache_installed = bool(shutil.which("apache2ctl"))
-    phpmyadmin_installed = Path("/usr/share/phpmyadmin").is_dir()
-    mysql_running = _run_check([shutil.which("mysqladmin") or "mysqladmin", "ping", "--silent"])
-    apache_running = _run_check([shutil.which("pgrep") or "pgrep", "-x", "apache2"])
-    components = {
-        "mysql": mysql_installed,
-        "apache": apache_installed,
-        "phpmyadmin": phpmyadmin_installed,
-    }
-    installed = mysql_installed or apache_installed or phpmyadmin_installed
-    complete = mysql_installed and apache_installed and phpmyadmin_installed
-    active = mysql_running or apache_running
-    running = mysql_running and apache_running
-    return installed, complete, running, {**components, "active": active}
-
-
-def _code_server_state() -> tuple[bool, bool, bool, dict[str, bool]]:
-    home = Path.home()
-    executable = home / ".local" / "bin" / "code-server"
-    installed = executable.is_file() or bool(shutil.which("code-server"))
-    state_dir = Path(os.environ.get("CODE_SERVER_STATE_DIR", home / ".local" / "state" / "kaggle-code-server"))
-    pid_file = state_dir / "code-server.pid"
-    running = False
+def _service_directories() -> list[Path]:
     try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-        command_line = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
-        running = "--config" in command_line and str(state_dir / "config.yaml") in command_line
-    except (OSError, ValueError):
-        pass
-    return installed, installed, running, {"code-server": installed, "active": running}
+        directories = [
+            entry for entry in _SERVICES_ROOT.iterdir()
+            if entry.is_dir() and not entry.is_symlink()
+        ]
+    except OSError:
+        return []
+    return sorted(directories, key=lambda entry: entry.name.casefold())
 
 
-def _read_credentials(service_id: str, service_dir: Path | None) -> dict | None:
+def _display_name(service_id: str) -> str:
+    return service_id.replace("_", " ").replace("-", " ").replace(".", " ").title()
+
+
+def _read_service_info(service_dir: Path | None) -> dict | None:
     if service_dir is None:
         return None
-    credentials_path = service_dir / _SERVICE_DEFINITIONS[service_id]["credentials_file"]
-    try:
-        lines = credentials_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    info_path = service_dir / "tmp" / "info.txt"
+    if info_path.is_symlink() or not info_path.is_file():
         return None
 
     fields = {}
-    for line in lines:
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        fields[key.strip().lower()] = value.strip()
-
-    password = fields.get("password")
-    if not password:
+    try:
+        lines = info_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
         return None
 
-    return {
-        "username": fields.get("username"),
-        "password": password,
-        "host": fields.get("host"),
-        "port": fields.get("port"),
-        "url": fields.get("phpmyadmin url") or fields.get("url"),
-        "workspace": fields.get("workspace"),
-    }
-
-
-def get_service_credentials(service_id: str) -> dict | None:
-    if service_id not in _SERVICE_DEFINITIONS:
-        raise KeyError("Unknown service.")
-    return _read_credentials(service_id, _service_directory(service_id))
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower().replace(" ", "_")
+        if key:
+            fields[key] = value.strip()
+    return fields or None
 
 
 def _task_payload(task: dict | None) -> dict | None:
@@ -152,50 +102,44 @@ def _task_payload(task: dict | None) -> dict | None:
 
 
 def list_services() -> list[dict]:
-    if _IS_LINUX:
-        mysql_installed, mysql_complete, mysql_running, mysql_components = _mysql_state()
-        code_installed, code_complete, code_running, code_components = _code_server_state()
-    else:
-        mysql_installed = mysql_complete = mysql_running = False
-        code_installed = code_complete = code_running = False
-        mysql_components = {"mysql": False, "apache": False, "phpmyadmin": False, "active": False}
-        code_components = {"code-server": False, "active": False}
-
-    states = {
-        "mysql": (mysql_installed, mysql_complete, mysql_running, mysql_components),
-        "code-server": (code_installed, code_complete, code_running, code_components),
-    }
     supported = _IS_LINUX and bool(shutil.which("bash"))
     services = []
-    for service_id, definition in _SERVICE_DEFINITIONS.items():
-        service_dir = _service_directory(service_id)
-        installed, complete, running, components = states[service_id]
-        credentials_available = _read_credentials(service_id, service_dir) is not None
+    for service_dir in _service_directories():
+        service_id = service_dir.name
+        info = _read_service_info(service_dir) or {}
+        actions = {
+            action: (service_dir / script_name).is_file()
+            and not (service_dir / script_name).is_symlink()
+            for action, script_name in _ACTIONS.items()
+        }
         with _TASK_LOCK:
             task = _TASKS.get(_SERVICE_TASKS.get(service_id))
             task_info = _task_payload(task)
-        scripts_available = bool(service_dir) and all(
-            (service_dir / script_name).is_file()
-            for script_name in definition["scripts"].values()
-        )
+
         services.append({
             "id": service_id,
-            "installed": installed,
-            "complete": complete,
-            "running": running,
-            "active": bool(components.get("active")),
-            "components": components,
-            "credentials_available": credentials_available,
-            "supported": supported and scripts_available,
+            "name": info.get("name") or _display_name(service_id),
+            "description": info.get("description", ""),
+            "info_available": bool(info),
+            "credentials_available": bool(info),
+            "actions": actions,
+            "supported": supported,
             "task": task_info,
         })
     return services
 
 
+def get_service_info(service_id: str) -> dict | None:
+    return _read_service_info(_service_directory(service_id))
+
+
+def get_service_credentials(service_id: str) -> dict | None:
+    # Keep the existing endpoint name for clients that still request credentials.
+    return get_service_info(service_id)
+
+
 def start_action(service_id: str, action: str) -> dict:
-    if service_id not in _SERVICE_DEFINITIONS:
-        raise KeyError("Unknown service.")
-    if action not in ("install", "start", "stop", "uninstall"):
+    if action not in _ACTIONS:
         raise ValueError("Unknown service action.")
     if not _IS_LINUX or not shutil.which("bash"):
         raise RuntimeError("Service actions require a Linux shell with bash.")
@@ -203,23 +147,10 @@ def start_action(service_id: str, action: str) -> dict:
     service_dir = _service_directory(service_id)
     if service_dir is None:
         raise FileNotFoundError("Service directory is not available.")
-    script_name = _SERVICE_DEFINITIONS[service_id]["scripts"][action]
-    script = service_dir / script_name
-    if not script.is_file():
-        raise FileNotFoundError(f"Service script not found: {script_name}")
 
-    installed, complete, running, components = (
-        _mysql_state() if service_id == "mysql" else _code_server_state()
-    )
-    active = bool(components.get("active"))
-    if action == "install" and complete:
-        raise RuntimeError("Service is already installed.")
-    if action == "start" and not complete:
-        raise RuntimeError("Install this service before starting it.")
-    if action == "stop" and not active:
-        raise RuntimeError("Service is already stopped.")
-    if action == "uninstall" and not installed and not active:
-        raise RuntimeError("Service is not installed.")
+    script = service_dir / _ACTIONS[action]
+    if script.is_symlink() or not script.is_file():
+        raise FileNotFoundError(f"Service script not found: {_ACTIONS[action]}")
 
     with _TASK_LOCK:
         previous_id = _SERVICE_TASKS.get(service_id)
@@ -229,9 +160,6 @@ def start_action(service_id: str, action: str) -> dict:
         if previous_id:
             _TASKS.pop(previous_id, None)
 
-        args = [shutil.which("bash") or "bash", str(script)]
-        if action == "install":
-            args.append("--install-only")
         log_dir = service_dir / "tmp"
         log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(log_dir, 0o700)
@@ -240,7 +168,7 @@ def start_action(service_id: str, action: str) -> dict:
         os.chmod(log_path, 0o600)
         with os.fdopen(log_fd, "wb") as output:
             process = subprocess.Popen(
-                args,
+                [shutil.which("bash") or "bash", str(script)],
                 cwd=str(service_dir),
                 stdin=subprocess.DEVNULL,
                 stdout=output,
