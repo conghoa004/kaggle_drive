@@ -11,6 +11,7 @@ _SERVICES_ROOT = Path(__file__).resolve().parents[2] / "services"
 _SERVICE_DEFINITIONS = {
     "mysql": {
         "folders": ("mysql",),
+        "credentials_file": "tmp/phpmyadmin_credentials.txt",
         "scripts": {
             "install": "install_mysql_phpmyadmin.sh",
             "start": "start_mysql_phpmyadmin.sh",
@@ -20,6 +21,7 @@ _SERVICE_DEFINITIONS = {
     },
     "code-server": {
         "folders": ("coder", "vs_code"),
+        "credentials_file": "tmp/credentials.txt",
         "scripts": {
             "install": "install_coder_server.sh",
             "start": "start_coder_server.sh",
@@ -92,6 +94,36 @@ def _code_server_state() -> tuple[bool, bool, bool, dict[str, bool]]:
     return installed, installed, running, {"code-server": installed, "active": running}
 
 
+def _read_credentials(service_id: str, service_dir: Path | None) -> dict | None:
+    if service_dir is None:
+        return None
+    credentials_path = service_dir / _SERVICE_DEFINITIONS[service_id]["credentials_file"]
+    try:
+        lines = credentials_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+    fields = {}
+    for line in lines:
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        fields[key.strip().lower()] = value.strip()
+
+    password = fields.get("password")
+    if not password:
+        return None
+
+    return {
+        "username": fields.get("username"),
+        "password": password,
+        "host": fields.get("host"),
+        "port": fields.get("port"),
+        "url": fields.get("phpmyadmin url") or fields.get("url"),
+        "workspace": fields.get("workspace"),
+    }
+
+
 def _task_payload(task: dict | None) -> dict | None:
     if not task:
         return None
@@ -132,6 +164,7 @@ def list_services() -> list[dict]:
     for service_id, definition in _SERVICE_DEFINITIONS.items():
         service_dir = _service_directory(service_id)
         installed, complete, running, components = states[service_id]
+        credentials = _read_credentials(service_id, service_dir)
         with _TASK_LOCK:
             task = _TASKS.get(_SERVICE_TASKS.get(service_id))
             task_info = _task_payload(task)
@@ -146,6 +179,7 @@ def list_services() -> list[dict]:
             "running": running,
             "active": bool(components.get("active")),
             "components": components,
+            "credentials": credentials,
             "supported": supported and scripts_available,
             "task": task_info,
         })

@@ -58,6 +58,7 @@ const App = {
     // Auth unauthorized listener
     window.addEventListener("auth:unauthorized", () => {
       this.closeTerminalSession();
+      this.clearServicesState();
       this.showLoginView();
     });
 
@@ -158,6 +159,14 @@ const App = {
     document.querySelectorAll("#sidebar .nav-link").forEach(link => {
       link.classList.toggle("active", link.id === navId);
     });
+  },
+
+  clearServicesState() {
+    AppState.services = [];
+    AppState.servicesError = "";
+    AppState.serviceTasks = {};
+    const body = document.getElementById("servicesStoreBody");
+    if (body) body.replaceChildren();
   },
 
   openStorageFolder() {
@@ -274,6 +283,7 @@ const App = {
 
   async handleLogout() {
     this.closeTerminalSession();
+    this.clearServicesState();
     try {
       await API.logout();
     } catch (_) {}
@@ -1711,6 +1721,26 @@ const App = {
           (active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500") + '"><span class="w-1.5 h-1.5 rounded-full ' +
           (active ? "bg-emerald-500" : "bg-slate-300") + '"></span>' + t(componentNames[key] || key) + '</span>')
         .join("");
+      const credentials = service.credentials || {};
+      const credentialFields = [
+        ["url", "services_credential_url"],
+        ["username", "services_credential_username"],
+        ["password", "services_credential_password"],
+        ["host", "services_credential_host"],
+        ["port", "services_credential_port"],
+        ["workspace", "services_credential_workspace"]
+      ].filter(([key]) => credentials[key]);
+      const credentialsPanel = credentialFields.length
+        ? '<div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
+          '<div class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5 mb-2"><i class="fa-solid fa-key text-amber-500"></i>' + t("services_credentials_title") + '</div>' +
+          '<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">' +
+            credentialFields.map(([key, label]) => '<div class="min-w-0"><div class="text-[10px] text-slate-500">' + t(label) + '</div>' +
+              '<div class="text-xs font-mono text-slate-800 break-all select-all cursor-text">' + UI.escape(String(credentials[key])) + '</div></div>').join("") +
+          '</div>' +
+        '</div>'
+        : service.complete
+          ? '<div class="mt-4 text-[11px] text-slate-400">' + t("services_credentials_missing") + '</div>'
+          : "";
 
       const actionButton = (action, enabled, style) => '<button type="button" onclick="App.runServiceAction(\'' + service.id + '\', \'' + action + '\')" ' +
         (enabled ? "" : "disabled") + ' class="' + style + ' disabled:opacity-45 disabled:cursor-not-allowed w-full text-xs py-2 px-2.5 justify-center">' +
@@ -1731,6 +1761,7 @@ const App = {
             '</div><p class="text-xs leading-5 text-slate-500 mt-1.5">' + t(view.description) + '</p></div>' +
           '</div>' +
           '<div class="flex flex-wrap items-center gap-2 mt-4"><span class="text-[11px] font-mono text-slate-500">' + t(view.details) + '</span>' + componentBadges + '</div>' +
+          credentialsPanel +
           failedNotice +
         '</div>' +
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50/80 border-t border-slate-100">' +

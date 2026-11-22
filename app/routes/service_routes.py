@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.security import require_auth
 from app.services import service_manager
@@ -8,8 +8,9 @@ router = APIRouter(prefix="/api/services", tags=["services"])
 
 
 @router.get("")
-def get_services(request: Request):
+def get_services(request: Request, response: Response):
     require_auth(request)
+    response.headers["Cache-Control"] = "no-store"
     return {"services": service_manager.list_services()}
 
 
