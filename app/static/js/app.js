@@ -4,6 +4,8 @@
 
 const AppState = {
   currentPath: localStorage.getItem("kaggle_drive_current_path") || "",
+  storagePath: localStorage.getItem("kaggle_drive_storage_path") || "",
+  servicesPath: localStorage.getItem("kaggle_drive_services_path") || "",
   parentPath: null,
   rootDir: "",
   files: [],
@@ -152,6 +154,10 @@ const App = {
     });
   },
 
+  openStorageFolder() {
+    this.loadDirectory(AppState.storagePath || "");
+  },
+
   openServicesFolder() {
     const normalizePath = value => String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
     const rootPath = normalizePath(AppState.rootDir || "/");
@@ -169,7 +175,9 @@ const App = {
       return;
     }
 
-    this.loadDirectory(relativePath);
+    const rememberedPath = normalizePath(AppState.servicesPath);
+    const rememberedPathIsInServices = !relativePath || rememberedPath === relativePath || rememberedPath.startsWith(relativePath + "/");
+    this.loadDirectory(rememberedPath && rememberedPathIsInServices ? rememberedPath : relativePath);
   },
 
   async checkAuthStatus() {
@@ -307,6 +315,17 @@ const App = {
     const isServicesPath = normalizedPath === "services" || normalizedPath.startsWith("services/") ||
       fullPath === servicesPath || fullPath.startsWith(servicesPath + "/");
     this.setActiveNavigation(isServicesPath ? "navServices" : "navStorage");
+    if (isServicesPath) {
+      AppState.servicesPath = normalizedPath;
+      try {
+        localStorage.setItem("kaggle_drive_services_path", normalizedPath);
+      } catch (_) {}
+    } else {
+      AppState.storagePath = normalizedPath;
+      try {
+        localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
+      } catch (_) {}
+    }
     AppState.currentPath = path;
     try {
       localStorage.setItem("kaggle_drive_current_path", path);
