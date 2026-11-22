@@ -187,8 +187,7 @@ const App = {
   },
 
   refreshCurrentDirectory() {
-    if (AppState.isServicesMode) return this.refreshServicesPage(true);
-    return this.loadDirectory(AppState.currentPath, false, "storage");
+    return this.loadDirectory(AppState.currentPath, false, AppState.isServicesMode ? "services" : "storage");
   },
 
   openServicesFolder() {
@@ -425,43 +424,6 @@ const App = {
     }
   },
 
-  getServiceActionForFile(item) {
-    if (!AppState.isServicesMode || item.is_dir) return null;
-    const serviceParts = String(AppState.currentPath || "").split("/").filter(Boolean);
-    if (serviceParts.length !== 1) return null;
-    const actions = {
-      "install.sh": "install",
-      "start.sh": "start",
-      "stop.sh": "stop",
-      "uninstall.sh": "uninstall"
-    };
-    const action = actions[item.name];
-    if (!action) return null;
-    const service = AppState.services.find(candidate => candidate.id === serviceParts[0]);
-    const task = service && (AppState.serviceTasks[service.id] || service.task);
-    return {
-      action,
-      service,
-      busy: Boolean(task && task.status === "running"),
-      enabled: Boolean(service && service.supported && !(task && task.status === "running"))
-    };
-  },
-
-  renderServiceActionButton(item, closeItemActions = false, compact = false) {
-    const actionInfo = this.getServiceActionForFile(item);
-    if (!actionInfo) return "";
-    const action = actionInfo.action;
-    const serviceId = String(AppState.currentPath || "").split("/").filter(Boolean)[0];
-    const serviceIdArg = UI.escape(JSON.stringify(serviceId));
-    const actionArg = UI.escape(JSON.stringify(action));
-    const icon = { install: "fa-download", start: "fa-play", stop: "fa-stop", uninstall: "fa-trash-can" }[action];
-    const style = action === "install" ? "primary" : action === "uninstall" ? "danger" : "secondary";
-    if (compact) {
-      return `<button type="button" class="table-btn-action" title="${t("services_action_" + action)}" ${actionInfo.enabled ? "" : "disabled"} onclick="event.stopPropagation(); App.runServiceAction(${serviceIdArg}, ${actionArg})"><i class="fa-solid ${icon}"></i></button>`;
-    }
-    return `<button type="button" onclick="event.stopPropagation(); ${closeItemActions ? "UI.closeModal('itemActionsModal'); " : ""}App.runServiceAction(${serviceIdArg}, ${actionArg})" ${actionInfo.enabled ? "" : "disabled"} class="btn-${style} text-xs py-1.5 px-2.5 inline-flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed" title="${t("services_action_" + action)}"><i class="fa-solid ${icon}"></i><span>${t("services_action_" + action)}</span></button>`;
-  },
-
   renderGridView(items, container) {
     let html = '<div class="file-grid">';
 
@@ -469,7 +431,6 @@ const App = {
       const isSelected = AppState.selectedItems.has(item.path);
       const icon = UI.getIcon(item);
       const safePath = UI.inlineJsString(item.path);
-      const serviceActionButton = this.renderServiceActionButton(item);
 
       html += `
         <div class="file-card ${isSelected ? 'selected' : ''}" 
@@ -489,7 +450,6 @@ const App = {
             <span>${item.formatted_size}</span>
             <span>${item.mtime.split(" ")[0]}</span>
           </div>
-          ${serviceActionButton ? `<div class="mt-2">${serviceActionButton}</div>` : ''}
         </div>
       `;
     });
@@ -520,7 +480,6 @@ const App = {
       const isSelected = AppState.selectedItems.has(item.path);
       const icon = UI.getIcon(item);
       const safePath = UI.inlineJsString(item.path);
-      const serviceActionButton = this.renderServiceActionButton(item, false, true);
 
       html += `
         <tr class="${isSelected ? 'selected' : ''}" 
@@ -544,9 +503,9 @@ const App = {
               ${!item.is_dir ? `
                 <button class="table-btn-action" title="${t("action_download")}" onclick="App.downloadFile('${safePath}')"><i class="fa-solid fa-download"></i></button>
                 <button class="table-btn-action" title="${t("action_preview")}" onclick="App.previewItem('${safePath}')"><i class="fa-solid fa-eye"></i></button>
-                ${serviceActionButton || ((item.extension || "").toLowerCase() === "sh" ? `
+                ${(item.extension || "").toLowerCase() === "sh" ? `
                   <button class="table-btn-action" title="${t("action_run_shell_script")}" onclick="App.runShellScript('${safePath}')"><i class="fa-solid fa-play"></i></button>
-                ` : '')}
+                ` : ''}
                 ${['code', 'text', 'markdown', 'csv'].includes(item.category) ? `
                   <button class="table-btn-action" title="${t("action_edit")}" onclick="Editor.openFile('${safePath}')"><i class="fa-solid fa-pen-to-square"></i></button>
                 ` : ''}
@@ -859,7 +818,6 @@ const App = {
         const isEditable = (['code', 'text', 'markdown'].includes(item.category) || ['csv', 'tsv'].includes((item.extension || '').toLowerCase())) && !['xlsx', 'xls'].includes((item.extension || '').toLowerCase());
         const isArchive = ['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', '7z', 'rar'].includes((item.extension || '').toLowerCase());
         const isShellScript = (item.extension || '').toLowerCase() === 'sh';
-        const serviceAction = this.getServiceActionForFile(item);
 
         let primaryIcon = 'fa-regular fa-eye';
         let primaryLabel = t("action_preview");
@@ -881,18 +839,7 @@ const App = {
           primaryLabel = isXls ? t("action_view_excel") : t("action_view_csv");
         }
 
-        if (isShellScript && serviceAction) {
-          const action = serviceAction.action;
-          const serviceId = String(AppState.currentPath || "").split("/").filter(Boolean)[0];
-          itemsHtml += `
-            <button class="context-menu-item" ${serviceAction.enabled ? "" : "disabled"} onclick="App.hideContextMenu(); App.runServiceAction(${UI.escape(JSON.stringify(serviceId))}, ${UI.escape(JSON.stringify(action))})">
-              <div class="context-item-left">
-                <span class="context-item-icon"><i class="fa-solid ${action === "install" ? "fa-download" : action === "uninstall" ? "fa-trash-can" : action === "start" ? "fa-play" : "fa-stop"}"></i></span>
-                <span>${t("services_action_" + action)}</span>
-              </div>
-            </button>
-          `;
-        } else if (isShellScript) {
+        if (isShellScript) {
           itemsHtml += `
             <button class="context-menu-item" onclick="App.hideContextMenu(); App.runShellScript('${safePath}')">
               <div class="context-item-left">
@@ -1453,15 +1400,14 @@ const App = {
     if (title) title.textContent = item.name;
 
     const safePath = UI.inlineJsString(path);
-    const serviceActionButton = this.renderServiceActionButton(item, true);
     let actions = `
       <div style="display: flex; flex-direction: column; gap: 8px;">
         ${!item.is_dir ? `
-          ${serviceActionButton || ((item.extension || "").toLowerCase() === "sh" ? `
+          ${(item.extension || "").toLowerCase() === "sh" ? `
             <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.runShellScript('${safePath}')">
               <i class="fa-solid fa-play"></i> ${t("action_run_shell_script")}
             </button>
-          ` : '')}
+          ` : ''}
           <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.downloadFile('${safePath}')">
             <i class="fa-solid fa-download"></i> ${t("action_download")}
           </button>
@@ -1687,28 +1633,11 @@ const App = {
     }
     AppState.isServicesMode = true;
     this.setActiveNavigation("navServices");
-    await this.refreshServicesPage(false);
+    await this.loadDirectory(AppState.servicesPath || "", false, "services");
   },
 
-  async refreshServicesPage(showToast = false) {
-    try {
-      const result = await API.getServices();
-      AppState.services = result.services || [];
-      AppState.servicesError = "";
-      AppState.services.forEach(service => {
-        if (service.task) AppState.serviceTasks[service.id] = service.task;
-      });
-    } catch (error) {
-      AppState.servicesError = error.message || String(error);
-      UI.toast(AppState.servicesError, "error");
-    }
-
-    if (AppState.isServicesMode) {
-      await this.loadDirectory(AppState.servicesPath || "", false, "services");
-    } else {
-      this.renderFiles();
-    }
-    if (showToast) UI.toast(t("services_store_refresh") + " ✓", "success");
+  async refreshServicesPage() {
+    return this.loadDirectory(AppState.servicesPath || "", false, "services");
   },
   async openServiceCredentials(serviceId) {
     const service = AppState.services.find(item => item.id === serviceId);
@@ -1815,7 +1744,7 @@ const App = {
       this.renderFiles();
       if (task.status === "running") continue;
 
-      await this.refreshServicesPage(false);
+      await this.loadDirectory(AppState.servicesPath || "", false, "services");
       const actionName = t("services_action_" + task.action).toLowerCase();
       if (task.status === "completed") {
         UI.toast(t("services_action_complete", { action: actionName }), "success");
