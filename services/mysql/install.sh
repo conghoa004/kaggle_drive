@@ -11,15 +11,18 @@ CREDENTIAL_FILE="$TMP_DIR/phpmyadmin_credentials.txt"
 INFO_FILE="$TMP_DIR/info.txt"
 
 APACHE_PORT="8081"
-INSTALL_ONLY=false
+INSTALL_ONLY=true
 
 for arg in "$@"; do
     case "$arg" in
         --install-only)
             INSTALL_ONLY=true
             ;;
+        --start-after-install)
+            INSTALL_ONLY=false
+            ;;
         -h|--help)
-            echo "Usage: bash install.sh [--install-only]"
+            echo "Usage: bash install.sh [--install-only|--start-after-install]"
             exit 0
             ;;
         *)
@@ -282,6 +285,7 @@ chmod 600 "$CREDENTIAL_FILE"
 cat > "$INFO_FILE" <<EOF
 name:MySQL + phpMyAdmin
 description:MySQL database with phpMyAdmin
+status:installed
 url:http://localhost:${APACHE_PORT}/phpmyadmin
 host:localhost
 port:3306
@@ -318,6 +322,7 @@ fi
 
 echo ""
 echo "========================================="
+sed -i 's/^status:.*/status:running/' "$INFO_FILE"
 echo "INSTALLATION COMPLETED SUCCESSFULLY"
 echo "========================================="
 

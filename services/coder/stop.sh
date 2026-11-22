@@ -38,6 +38,9 @@ log() {
 # ==========================================
 
 if [[ ! -f "$PID_FILE" ]]; then
+    if [[ -f "$INFO_FILE" ]]; then
+        sed -i -e 's/^status:.*/status:stopped/' -e 's/^pid:.*/pid:/' "$INFO_FILE"
+    fi
     log "code-server is not running."
     exit 0
 fi
@@ -107,8 +110,8 @@ rm -f "$PID_FILE"
 if [[ -f "$INFO_FILE" ]]; then
 
     sed -i \
-        -e 's/^STATUS=.*/STATUS=stopped/' \
-        -e 's/^PID=.*/PID=/' \
+        -e 's/^status:.*/status:stopped/' \
+        -e 's/^pid:.*/pid:' \
         "$INFO_FILE"
 
 fi

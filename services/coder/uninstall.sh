@@ -47,14 +47,9 @@ die() {
 
 log "Starting code-server uninstall..."
 
-if [[ -f "$PID_FILE" ]]; then
-
-    log "Stopping code-server..."
-
-    bash "$SCRIPT_DIR/stop.sh" || \
-        die "Could not safely stop code-server."
-
-fi
+log "Stopping code-server if it is running..."
+bash "$SCRIPT_DIR/stop.sh" || \
+    die "Could not safely stop code-server."
 
 # ==========================================
 # Remove standalone installation
@@ -108,9 +103,9 @@ log "PID file removed."
 if [[ -f "$INFO_FILE" ]]; then
 
     sed -i \
-        -e 's/^STATUS=.*/STATUS=uninstalled/' \
-        -e 's/^PASSWORD=.*/PASSWORD=/' \
-        -e 's/^PID=.*/PID=/' \
+        -e 's/^status:.*/status:uninstalled/' \
+        -e 's/^password:.*/password:' \
+        -e 's/^pid:.*/pid:' \
         "$INFO_FILE"
 
 fi

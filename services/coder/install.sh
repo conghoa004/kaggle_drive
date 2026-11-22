@@ -11,7 +11,7 @@ TMP_DIR="$SCRIPT_DIR/tmp"
 
 LOCAL_BIN="$HOME/.local/bin"
 
-PORT="${CODE_SERVER_PORT:-8080}"
+PORT="${CODE_SERVER_PORT:-8082}"
 HOST="127.0.0.1"
 WORKSPACE="${KAGGLE_WORKING_DIR:-/kaggle/working}"
 
@@ -60,6 +60,9 @@ for dependency in bash curl python3; do
     command -v "$dependency" >/dev/null 2>&1 || \
         die "Missing dependency: $dependency"
 done
+
+[[ "$PORT" =~ ^[0-9]{1,5}$ ]] && (( PORT > 0 && PORT <= 65535 )) || \
+    die "Invalid CODE_SERVER_PORT: $PORT"
 
 mkdir -p "$WORKSPACE"
 
@@ -121,25 +124,20 @@ fi
 INSTALLED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
 
 cat > "$INFO_FILE" <<EOF
-SERVICE=code-server
-STATUS=installed
-
-HOST=${HOST}
-PORT=${PORT}
-URL=http://${HOST}:${PORT}
-
-WORKSPACE=${WORKSPACE}
-
-AUTH=password
-PASSWORD=${PASSWORD}
-
-PID=
-
-CONFIG_FILE=${CONFIG_FILE}
-LOG_FILE=${SERVER_LOG}
-
-INSTALLED_AT=${INSTALLED_AT}
-STARTED_AT=
+name:Code Server
+description:Browser-based VS Code environment
+status:installed
+host:${HOST}
+port:${PORT}
+url:http://${HOST}:${PORT}
+workspace:${WORKSPACE}
+auth:password
+password:${PASSWORD}
+pid:
+config_file:${CONFIG_FILE}
+log_file:${SERVER_LOG}
+installed_at:${INSTALLED_AT}
+started_at:
 EOF
 
 chmod 600 "$INFO_FILE"

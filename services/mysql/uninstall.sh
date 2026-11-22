@@ -118,6 +118,9 @@ else
     echo "MySQL data was preserved at /var/lib/mysql (if present)."
     echo "Generated credentials were preserved at $CREDENTIAL_FILE (if present)."
     echo "To remove both, rerun this script with --purge-data."
+    if [[ -f "$INFO_FILE" ]]; then
+        sed -i 's/^status:.*/status:uninstalled/' "$INFO_FILE"
+    fi
 fi
 
 if [[ "$PURGE_DATA" == true && -d "$TMP_DIR" ]]; then

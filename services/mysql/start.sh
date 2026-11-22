@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 APACHE_PORT=8081
 MYSQL_SAFE_LOG=/var/log/mysql_safe.log
 CREDENTIAL_FILE="$SCRIPT_DIR/tmp/phpmyadmin_credentials.txt"
+INFO_FILE="$SCRIPT_DIR/tmp/info.txt"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -115,3 +116,22 @@ echo "MYSQL VERSION"
 echo "-----------------------------------------"
 mysql --version
 echo "MySQL startup log: $MYSQL_SAFE_LOG"
+
+INFO_USERNAME=""
+INFO_PASSWORD=""
+if [[ -f "$CREDENTIAL_FILE" ]]; then
+    INFO_USERNAME="$(sed -n 's/^Username:[[:space:]]*//p' "$CREDENTIAL_FILE" | head -n 1)"
+    INFO_PASSWORD="$(sed -n 's/^Password:[[:space:]]*//p' "$CREDENTIAL_FILE" | head -n 1)"
+fi
+mkdir -p "$SCRIPT_DIR/tmp"
+cat > "$INFO_FILE" <<EOF
+name:MySQL + phpMyAdmin
+description:MySQL database with phpMyAdmin
+status:running
+url:http://localhost:${APACHE_PORT}/phpmyadmin
+host:localhost
+port:3306
+username:${INFO_USERNAME}
+password:${INFO_PASSWORD}
+EOF
+chmod 600 "$INFO_FILE"

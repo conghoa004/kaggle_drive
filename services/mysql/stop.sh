@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+INFO_FILE="$SCRIPT_DIR/tmp/info.txt"
+
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: Run this script as root."
     exit 1
+fi
+
+if ! command -v mysqladmin >/dev/null 2>&1 && ! command -v apache2ctl >/dev/null 2>&1; then
+    if [[ -f "$INFO_FILE" ]]; then
+        sed -i 's/^status:.*/status:uninstalled/' "$INFO_FILE"
+    fi
+    echo "MySQL and Apache are not installed."
+    exit 0
 fi
 
 for cmd in mysqladmin service apache2ctl pgrep; do
@@ -64,6 +75,10 @@ fi
 
 if [[ "$FAILED" == true ]]; then
     exit 1
+fi
+
+if [[ -f "$INFO_FILE" ]]; then
+    sed -i 's/^status:.*/status:stopped/' "$INFO_FILE"
 fi
 
 echo "Services stopped."
