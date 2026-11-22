@@ -13,15 +13,36 @@ const Uploader = {
   setupGlobalDragDrop() {
     const overlay = document.getElementById("dragOverlay");
     let dragCounter = 0;
+    const isFileDrag = (event) => {
+      const transfer = event.dataTransfer;
+      if (!transfer) return false;
+
+      const types = Array.from(transfer.types || []);
+      if (types.includes("Files")) return true;
+
+      return Array.from(transfer.items || []).some(item => item.kind === "file");
+    };
+    const isStorageView = () => {
+      const storageNav = document.getElementById("navStorage");
+      const mainContent = document.getElementById("mainContentArea");
+      return Boolean(
+        storageNav && storageNav.classList.contains("active") &&
+        mainContent && !mainContent.classList.contains("hidden")
+      );
+    };
 
     window.addEventListener("dragenter", (e) => {
+      if (!isFileDrag(e)) return;
       e.preventDefault();
+      if (!isStorageView()) return;
       dragCounter++;
       if (overlay) overlay.classList.add("active");
     });
 
     window.addEventListener("dragleave", (e) => {
+      if (!isFileDrag(e)) return;
       e.preventDefault();
+      if (!isStorageView()) return;
       dragCounter--;
       if (dragCounter <= 0) {
         dragCounter = 0;
@@ -30,16 +51,19 @@ const Uploader = {
     });
 
     window.addEventListener("dragover", (e) => {
+      if (!isFileDrag(e)) return;
       e.preventDefault();
     });
 
     window.addEventListener("drop", (e) => {
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || files.length === 0) return;
+
       e.preventDefault();
       dragCounter = 0;
       if (overlay) overlay.classList.remove("active");
 
-      const files = e.dataTransfer.files;
-      if (files && files.length > 0) {
+      if (isStorageView()) {
         this.uploadFilesList(Array.from(files));
       }
     });
