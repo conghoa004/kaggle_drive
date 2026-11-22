@@ -2,11 +2,23 @@
 
 set -Eeuo pipefail
 
-LOG_FILE="/kaggle/working/kaggle_drive/services/mysql/tmp/mysql_phpmyadmin_install.log"
-CREDENTIAL_FILE="/kaggle/working/kaggle_drive/services/mysql/tmp/phpmyadmin_credentials.txt"
+BASE_DIR="/kaggle/working/kaggle_drive/services/mysql"
+TMP_DIR="$BASE_DIR/tmp"
+
+LOG_FILE="$TMP_DIR/mysql_phpmyadmin_install.log"
+CREDENTIAL_FILE="$TMP_DIR/phpmyadmin_credentials.txt"
+
 APACHE_PORT="8081"
 
+# Create required directories before initializing logging
+mkdir -p "$TMP_DIR"
+
+# Restrict file permissions
 umask 077
+
+# Initialize logging
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
