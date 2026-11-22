@@ -1199,20 +1199,18 @@ const I18n = {
   },
 
   setLanguage(lang) {
-    if (!this.locales[lang]) return;
-    this.currentLang = lang;
+    if (!this.locales[lang] || lang === this.currentLang) return;
+
     localStorage.setItem("kaggle_drive_lang", lang);
-    document.documentElement.lang = lang;
-    this.updateLanguageUI();
-    this.translateDOM();
 
-    // Close any open language dropdowns
-    document.querySelectorAll(".lang-dropdown-menu").forEach(el => el.classList.add("hidden"));
-
-    // Inform App to re-render dynamic content
-    if (window.App && typeof App.onLanguageChange === "function") {
-      App.onLanguageChange();
+    // Remove an explicit URL language so the saved selection takes effect after reload.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("lang")) {
+      url.searchParams.delete("lang");
+      window.history.replaceState(window.history.state, "", url);
     }
+
+    window.location.reload();
   },
 
   toggleDropdown(event, dropdownId = "langDropdownMenu") {
