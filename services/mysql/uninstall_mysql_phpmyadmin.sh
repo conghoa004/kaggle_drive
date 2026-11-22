@@ -76,10 +76,19 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 echo "Removing MySQL, Apache, PHP, and phpMyAdmin packages..."
+PHP_VERSIONED_PACKAGES=()
+while IFS= read -r package; do
+    if [[ "$package" =~ ^php[0-9]+\.[0-9]+(-.*)?$ ]] ||
+        [[ "$package" =~ ^libapache2-mod-php[0-9]+\.[0-9]+$ ]]; then
+        PHP_VERSIONED_PACKAGES+=("$package")
+    fi
+done < <(dpkg-query -W -f='${Package}\n' 2>/dev/null || true)
+
 apt-get purge -y \
     phpmyadmin \
     mysql-server \
     apache2 \
+    "${PHP_VERSIONED_PACKAGES[@]}" \
     php \
     php-cli \
     php-common \
