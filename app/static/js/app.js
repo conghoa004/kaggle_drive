@@ -20,12 +20,13 @@ const AppState = {
   services: [],
   servicesError: "",
   serviceTasks: {},
-  serviceFolders: {}
+  servicesDirectory: { path: "", parentPath: null, entries: [], loading: false, error: "" }
 };
 
 const App = {
   serviceCredentialsModalData: null,
   serviceCredentialsRequestId: 0,
+  servicesDirectoryRequestId: 0,
 
   init() {
     I18n.init();
@@ -165,10 +166,11 @@ const App = {
   },
 
   clearServicesState() {
+    this.servicesDirectoryRequestId += 1;
     AppState.services = [];
     AppState.servicesError = "";
     AppState.serviceTasks = {};
-    AppState.serviceFolders = {};
+    AppState.servicesDirectory = { path: "", parentPath: null, entries: [], loading: false, error: "" };
     this.clearServiceCredentialsModal();
     const body = document.getElementById("servicesStoreBody");
     if (body) body.replaceChildren();
@@ -1631,6 +1633,8 @@ const App = {
       servicesPage.style.display = "flex";
     }
     this.setActiveNavigation("navServices");
+    AppState.servicesError = "";
+    AppState.servicesDirectory = { path: "", parentPath: null, entries: [], loading: false, error: "" };
     await this.refreshServicesPage(false);
   },
 
@@ -1638,27 +1642,40 @@ const App = {
     const body = document.getElementById("servicesStoreBody");
     const button = document.getElementById("btnRefreshServices");
     const originalButton = button && showToast ? button.innerHTML : null;
+    const directoryState = AppState.servicesDirectory;
+    const requestId = ++this.servicesDirectoryRequestId;
+    directoryState.loading = true;
+    directoryState.error = "";
     if (button && showToast) {
       button.disabled = true;
       button.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i> ' + t("services_store_refresh");
     }
-    if (body && !AppState.services.length && !AppState.servicesError) {
-      body.innerHTML = '<div class="col-span-full flex items-center gap-2 text-sm text-slate-500 py-6"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i><span>' + t("services_store_loading") + '</span></div>';
-    }
+    if (body) this.renderServicesPage();
 
     try {
-      const result = await API.getServices();
-      AppState.services = result.services || [];
+      const [servicesResult, directoryResult] = await Promise.all([
+        API.getServices(),
+        API.getServicesDirectory(directoryState.path || "")
+      ]);
+      if (requestId !== this.servicesDirectoryRequestId) return;
+      AppState.services = servicesResult.services || [];
       AppState.servicesError = "";
       AppState.services.forEach(service => {
         if (service.task) AppState.serviceTasks[service.id] = service.task;
       });
-      this.renderServicesPage();
+      directoryState.path = directoryResult.path || "";
+      directoryState.parentPath = directoryResult.parent_path;
+      directoryState.entries = directoryResult.entries || [];
       if (showToast) UI.toast(t("services_store_refresh") + " ✓", "success");
     } catch (error) {
+      if (requestId !== this.servicesDirectoryRequestId) return;
       AppState.servicesError = error.message || String(error);
-      this.renderServicesPage();
+      directoryState.error = error.message || String(error);
     } finally {
+      if (requestId === this.servicesDirectoryRequestId) {
+        directoryState.loading = false;
+        this.renderServicesPage();
+      }
       if (button && originalButton) {
         button.innerHTML = originalButton;
         button.disabled = false;
@@ -1666,159 +1683,145 @@ const App = {
     }
   },
 
-  renderServicesPage() {
-    const body = document.getElementById("servicesStoreBody");
-    if (!body) return;
-
-    if (AppState.servicesError) {
-      body.innerHTML = '<div class="col-span-full text-sm text-rose-700 p-4 rounded-xl bg-rose-50 border border-rose-100">' +
-        t("services_store_error", { msg: UI.escape(AppState.servicesError) }) +
-        '<div><button class="btn-secondary text-xs py-2 px-3 mt-3" onclick="App.refreshServicesPage(false)">' + t("services_store_retry") + '</button></div>' +
-      '</div>';
-      return;
-    }
-
-    const actionIcons = {
-      install: "fa-download",
-      start: "fa-play",
-      stop: "fa-stop",
-      uninstall: "fa-trash-can"
-    };
-
-    const cards = AppState.services.map(service => {
-      const serviceIdArg = UI.escape(JSON.stringify(service.id));
-      const serviceName = UI.escape(service.name || service.id);
-      const folderName = UI.escape(service.id);
-      const description = service.description
-        ? '<p class="text-xs leading-5 text-slate-500 mt-1.5">' + UI.escape(service.description) + '</p>'
-        : "";
-      const folderState = AppState.serviceFolders[service.id];
-      const task = AppState.serviceTasks[service.id] || service.task;
-      const busy = Boolean(task && task.status === "running");
-      const statusText = !service.supported
-        ? t("services_unsupported")
-        : busy
-          ? t("services_action_busy", { action: t("services_action_" + task.action).toLowerCase() })
-          : service.info_available
-            ? t("services_info_available")
-            : t("services_info_missing");
-      const statusClass = busy
-        ? "bg-emerald-50 text-emerald-700"
-        : service.info_available
-          ? "bg-cyan-50 text-cyan-700"
-          : "bg-slate-100 text-slate-500";
-
-      const infoButton = '<button type="button" onclick="App.openServiceCredentials(' + serviceIdArg + ')" ' +
-        (service.info_available && !busy ? "" : "disabled") +
-        ' title="' + UI.escape(service.info_available ? t("services_credentials_title") : t("services_credentials_missing")) + '"' +
-        ' class="btn-secondary text-xs py-2 px-3 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">' +
-        '<i class="fa-solid fa-circle-info text-amber-500"></i><span>' + t("services_credentials_title") + '</span></button>';
-
-      const actionButton = action => {
-        const enabled = service.supported && !busy && Boolean(service.actions && service.actions[action]);
-        return '<button type="button" onclick="App.runServiceAction(' + serviceIdArg + ', \'' + action + '\')" ' +
-          (enabled ? "" : "disabled") + ' class="btn-' + (action === "install" ? "primary" : action === "uninstall" ? "danger" : "secondary") +
-          ' flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed w-full text-xs py-2 px-2.5 justify-center">' +
-          '<i class="fa-solid ' + actionIcons[action] + '"></i><span>' + t("services_action_" + action) + '</span></button>';
-      };
-
-      const failedNotice = task && task.status === "failed"
-        ? '<p class="text-[11px] text-rose-600 mt-3">' + t("services_action_failed", { code: Number(task.return_code || 1) }) + '</p>' +
-          (task.log_file ? '<p class="text-[10px] text-slate-500 mt-1 break-all">' + t("services_action_log_file", { path: UI.escape(task.log_file) }) + '</p>' : "")
-        : "";
-
-      let folderContents = "";
-      if (folderState && folderState.open) {
-        const folderPath = folderState.path ? folderState.path + "/" : "";
-        const fullPath = "services/" + service.id + "/" + folderPath;
-        const folderHeader = '<div class="flex items-center justify-between gap-2 mb-2">' +
-          '<p class="text-[11px] font-mono text-slate-500 truncate" title="' + UI.escape(fullPath) + '">' + UI.escape(fullPath) + '</p>' +
-          (typeof folderState.parentPath === "string"
-            ? '<button type="button" class="text-xs text-brand-700 hover:text-brand-900" onclick="App.navigateServiceFolder(' + serviceIdArg + ', ' + UI.escape(JSON.stringify(folderState.parentPath)) + ')"><i class="fa-solid fa-arrow-up mr-1"></i>' + t("services_folder_up") + '</button>'
-            : "") +
-          '</div>';
-        if (folderState.loading) {
-          folderContents = '<div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">' + folderHeader +
-            '<div class="flex items-center gap-2 text-xs text-slate-500"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>' + t("services_folder_loading") + '</div></div>';
-        } else if (folderState.error) {
-          folderContents = '<div class="mt-3 rounded-xl border border-rose-100 bg-rose-50 p-3">' + folderHeader +
-            '<p class="text-xs text-rose-700">' + t("services_folder_error", { msg: UI.escape(folderState.error) }) + '</p>' +
-            '<button type="button" class="btn-secondary text-xs py-1.5 px-2 mt-2" onclick="App.navigateServiceFolder(' + serviceIdArg + ', ' + UI.escape(JSON.stringify(folderState.path || "")) + ')">' + t("services_store_retry") + '</button></div>';
-        } else {
-          const rows = (folderState.entries || []).map(entry => {
-            if (entry.type === "directory") {
-              const nextPath = folderState.path ? folderState.path + "/" + entry.name : entry.name;
-              return '<button type="button" class="flex items-center gap-2 w-full text-left rounded-lg px-2.5 py-2 text-xs text-slate-700 hover:bg-cyan-50" onclick="App.navigateServiceFolder(' + serviceIdArg + ', ' + UI.escape(JSON.stringify(nextPath)) + ')">' +
-                '<i class="fa-solid fa-folder text-amber-500"></i><span class="truncate">' + UI.escape(entry.name) + '/</span><i class="fa-solid fa-chevron-right ml-auto text-[10px] text-slate-400"></i></button>';
-            }
-            return '<div class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-slate-600"><i class="fa-regular fa-file-lines text-slate-400"></i><span class="truncate">' + UI.escape(entry.name) + '</span></div>';
-          }).join("");
-          folderContents = '<div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">' + folderHeader +
-            (rows || '<p class="text-xs text-slate-500 py-2">' + t("services_folder_empty") + '</p>') + '</div>';
-        }
-      }
-
-      return '<article class="rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition overflow-hidden">' +
-        '<div class="p-4 sm:p-5">' +
-          '<div class="flex items-start gap-3">' +
-            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg bg-amber-50 text-amber-600"><i class="fa-solid fa-folder"></i></div>' +
-            '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2">' +
-              '<button type="button" class="font-mono font-bold text-slate-800 hover:text-brand-700" onclick="App.toggleServiceFolder(' + serviceIdArg + ')">services/' + folderName + '/</button>' +
-              '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + statusClass + '">' +
-                (busy ? '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>' : '') + statusText + '</span>' +
-            '</div><p class="text-xs font-semibold text-slate-700 mt-1">' + serviceName + '</p>' + description + '</div>' +
-          '</div>' +
-          '<div class="mt-4">' + infoButton + '</div>' +
-          folderContents +
-          failedNotice +
-        '</div>' +
-        '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50/80 border-t border-slate-100">' +
-          ["install", "start", "stop", "uninstall"].map(actionButton).join("") +
-        '</div>' +
-      '</article>';
-    }).join("");
-
-    body.innerHTML = cards || '<div class="col-span-full text-sm text-slate-500 p-4 rounded-xl bg-white border border-slate-200">' + t("services_store_empty") + '</div>';
-  },
-
-  async toggleServiceFolder(serviceId) {
-    const current = AppState.serviceFolders[serviceId];
-    if (current && current.open) {
-      current.open = false;
-      this.renderServicesPage();
-      return;
-    }
-    if (current && current.loaded && !current.error) {
-      current.open = true;
-      this.renderServicesPage();
-      return;
-    }
-    await this.navigateServiceFolder(serviceId, current ? current.path : "");
-  },
-
-  async navigateServiceFolder(serviceId, path = "") {
-    const state = AppState.serviceFolders[serviceId] || {};
-    state.open = true;
-    state.loading = true;
-    state.error = "";
-    state.path = path;
-    state.entries = state.entries || [];
-    AppState.serviceFolders[serviceId] = state;
+  async navigateServicesDirectory(path = "") {
+    const directoryState = AppState.servicesDirectory;
+    const requestId = ++this.servicesDirectoryRequestId;
+    directoryState.path = path;
+    directoryState.parentPath = null;
+    directoryState.entries = [];
+    directoryState.loading = true;
+    directoryState.error = "";
+    AppState.servicesError = "";
     this.renderServicesPage();
 
     try {
-      const result = await API.getServiceFiles(serviceId, path);
-      state.path = result.path || "";
-      state.parentPath = result.parent_path;
-      state.entries = result.entries || [];
-      state.loaded = true;
+      const result = await API.getServicesDirectory(path);
+      if (requestId !== this.servicesDirectoryRequestId) return;
+      directoryState.path = result.path || "";
+      directoryState.parentPath = result.parent_path;
+      directoryState.entries = result.entries || [];
     } catch (error) {
-      state.error = error.message || String(error);
-      state.loaded = false;
+      if (requestId !== this.servicesDirectoryRequestId) return;
+      directoryState.error = error.message || String(error);
     } finally {
-      state.loading = false;
-      this.renderServicesPage();
+      if (requestId === this.servicesDirectoryRequestId) {
+        directoryState.loading = false;
+        this.renderServicesPage();
+      }
     }
+  },
+
+  goUpServicesDirectory() {
+    const parentPath = AppState.servicesDirectory.parentPath;
+    if (typeof parentPath === "string") {
+      return this.navigateServicesDirectory(parentPath);
+    }
+  },
+
+  renderServicesPage() {
+    const body = document.getElementById("servicesStoreBody");
+    const breadcrumb = document.getElementById("servicesBreadcrumb");
+    const backButton = document.getElementById("btnServicesBack");
+    if (!body) return;
+
+    const directoryState = AppState.servicesDirectory;
+    const pathParts = directoryState.path ? directoryState.path.split("/") : [];
+    if (backButton) backButton.disabled = typeof directoryState.parentPath !== "string";
+
+    if (breadcrumb) {
+      let currentPath = "";
+      const crumbs = [{ label: "services", path: "" }];
+      pathParts.forEach(part => {
+        currentPath = currentPath ? currentPath + "/" + part : part;
+        crumbs.push({ label: part, path: currentPath });
+      });
+      breadcrumb.innerHTML = crumbs.map((crumb, index) => {
+        const isLast = index === crumbs.length - 1;
+        const pathArg = UI.escape(JSON.stringify(crumb.path));
+        return (index ? '<i class="fa-solid fa-chevron-right text-[9px] text-slate-400"></i>' : '') +
+          '<button type="button" class="' + (isLast ? 'text-slate-800 font-semibold' : 'hover:text-brand-700') + '" onclick="App.navigateServicesDirectory(' + pathArg + ')">' +
+          (index === 0 ? '<i class="fa-solid fa-folder-tree mr-1 text-amber-500"></i>' : '') + UI.escape(crumb.label) + '</button>';
+      }).join("");
+    }
+
+    if (AppState.servicesError) {
+      body.innerHTML = '<div class="text-sm text-rose-700 p-4 rounded-xl bg-rose-50 border border-rose-100">' +
+        t("services_store_error", { msg: UI.escape(AppState.servicesError) }) +
+        '<div><button class="btn-secondary text-xs py-2 px-3 mt-3" onclick="App.refreshServicesPage(false)">' + t("services_store_retry") + '</button></div></div>';
+      return;
+    }
+    if (directoryState.error) {
+      body.innerHTML = '<div class="text-sm text-rose-700 p-4 rounded-xl bg-rose-50 border border-rose-100">' +
+        t("services_folder_error", { msg: UI.escape(directoryState.error) }) +
+        '<div><button class="btn-secondary text-xs py-2 px-3 mt-3" onclick="App.navigateServicesDirectory(' + UI.escape(JSON.stringify(directoryState.path || "")) + ')">' + t("services_store_retry") + '</button></div></div>';
+      return;
+    }
+    if (directoryState.loading) {
+      body.innerHTML = '<div class="flex items-center gap-2 text-sm text-slate-500 py-6"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i><span>' + t("services_store_loading") + '</span></div>';
+      return;
+    }
+
+    const activeService = pathParts.length === 1
+      ? AppState.services.find(service => service.id === pathParts[0])
+      : null;
+    const serviceTask = activeService && (AppState.serviceTasks[activeService.id] || activeService.task);
+    const serviceBusy = Boolean(serviceTask && serviceTask.status === "running");
+    let serviceSummary = "";
+    if (activeService) {
+      const infoButton = '<button type="button" onclick="App.openServiceCredentials(' + UI.escape(JSON.stringify(activeService.id)) + ')" ' +
+        (activeService.info_available && !serviceBusy ? "" : "disabled") +
+        ' class="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"><i class="fa-solid fa-circle-info text-amber-500"></i>' + t("services_credentials_title") + '</button>';
+      serviceSummary = '<div class="flex flex-wrap items-start justify-between gap-3 p-3 mb-3 rounded-xl border border-slate-200 bg-white">' +
+        '<div><p class="font-semibold text-sm text-slate-800">' + UI.escape(activeService.name || activeService.id) + '</p>' +
+        (activeService.description ? '<p class="text-xs text-slate-500 mt-1">' + UI.escape(activeService.description) + '</p>' : "") +
+        (serviceTask && serviceTask.status === "failed" ? '<p class="text-xs text-rose-600 mt-2">' + t("services_action_failed", { code: Number(serviceTask.return_code || 1) }) + '</p>' : "") +
+        '</div>' + infoButton + '</div>';
+    }
+
+    const actionByFilename = {
+      "install.sh": "install",
+      "start.sh": "start",
+      "stop.sh": "stop",
+      "uninstall.sh": "uninstall"
+    };
+    const actionIcons = { install: "fa-download", start: "fa-play", stop: "fa-stop", uninstall: "fa-trash-can" };
+    const formatSize = bytes => {
+      if (typeof bytes !== "number") return "—";
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    };
+    const rows = directoryState.entries.map(entry => {
+      const entryPath = directoryState.path ? directoryState.path + "/" + entry.name : entry.name;
+      const entryPathArg = UI.escape(JSON.stringify(entryPath));
+      const icon = entry.type === "directory"
+        ? '<i class="fa-solid fa-folder text-amber-500"></i>'
+        : '<i class="fa-regular fa-file-lines text-slate-400"></i>';
+      const name = entry.type === "directory"
+        ? '<button type="button" class="font-medium text-slate-800 hover:text-brand-700" onclick="App.navigateServicesDirectory(' + entryPathArg + ')">' + UI.escape(entry.name) + '</button>'
+        : '<span class="font-medium text-slate-700">' + UI.escape(entry.name) + '</span>';
+
+      let actionButton = "";
+      const action = pathParts.length === 1 ? actionByFilename[entry.name] : null;
+      if (action && entry.type === "file" && activeService) {
+        const enabled = activeService.supported && !serviceBusy && Boolean(activeService.actions && activeService.actions[action]);
+        actionButton = '<button type="button" onclick="App.runServiceAction(' + UI.escape(JSON.stringify(activeService.id)) + ', \'' + action + '\')" ' +
+          (enabled ? "" : "disabled") + ' class="btn-' + (action === "install" ? "primary" : action === "uninstall" ? "danger" : "secondary") +
+          ' text-xs py-1.5 px-2.5 flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed"><i class="fa-solid ' + actionIcons[action] + '"></i><span>' + t("services_action_" + action) + '</span></button>';
+      }
+
+      const modified = entry.modified ? new Date(entry.modified).toLocaleString() : "—";
+      return '<div class="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 hover:bg-slate-50">' +
+        '<div class="flex min-w-0 flex-1 items-center gap-3">' + icon + '<div class="min-w-0 truncate">' + name + '</div></div>' +
+        '<span class="w-20 text-right text-[11px] text-slate-500">' + (entry.type === "file" ? formatSize(entry.size) : "—") + '</span>' +
+        '<span class="hidden md:block w-40 text-right text-[11px] text-slate-500">' + UI.escape(modified) + '</span>' +
+        '<div class="w-28 flex justify-end">' + actionButton + '</div></div>';
+    }).join("");
+
+    const tableHeader = '<div class="hidden md:flex items-center gap-3 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">' +
+      '<span class="flex-1">' + t("col_name") + '</span><span class="w-20 text-right">' + t("col_size") + '</span>' +
+      '<span class="w-40 text-right">' + t("col_date") + '</span><span class="w-28 text-right">' + t("col_actions") + '</span></div>';
+    body.innerHTML = serviceSummary + tableHeader + (rows || '<div class="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">' + t("services_folder_empty") + '</div>');
   },
 
   async openServiceCredentials(serviceId) {
@@ -1841,7 +1844,6 @@ const App = {
       this.renderServiceCredentialsModal();
     }
   },
-
   renderServiceCredentialsModal() {
     const data = this.serviceCredentialsModalData;
     if (!data) return;

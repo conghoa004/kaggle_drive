@@ -44,17 +44,16 @@ def get_service_credentials(request: Request, response: Response, service_id: st
     return {"credentials": credentials}
 
 
-@router.get("/{service_id}/files")
-def get_service_files(
+@router.get("/directory")
+def get_services_directory(
     request: Request,
     response: Response,
-    service_id: str,
-    path: str = Query(default=""),
+    path: str = Query(default="", max_length=4096),
 ):
     require_auth(request)
     response.headers["Cache-Control"] = "no-store"
     try:
-        return service_manager.list_service_files(service_id, path)
+        return service_manager.list_services_directory(path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

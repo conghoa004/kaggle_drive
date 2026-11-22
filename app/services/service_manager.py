@@ -133,36 +133,36 @@ def get_service_info(service_id: str) -> dict | None:
     return _read_service_info(_service_directory(service_id))
 
 
-def list_service_files(service_id: str, relative_path: str = "") -> dict:
-    service_dir = _service_directory(service_id)
-    if service_dir is None:
-        raise FileNotFoundError("Service directory is not available.")
+def list_services_directory(relative_path: str = "") -> dict:
+    services_root = _SERVICES_ROOT
+    if services_root.is_symlink() or not services_root.is_dir():
+        raise FileNotFoundError("Services directory is not available.")
 
     parts = []
     if relative_path:
         if relative_path.startswith(("/", "\\")) or "\\" in relative_path:
-            raise ValueError("Invalid service directory path.")
+            raise ValueError("Invalid Services directory path.")
         parts = relative_path.split("/")
         if any(part in ("", ".", "..") for part in parts):
-            raise ValueError("Invalid service directory path.")
+            raise ValueError("Invalid Services directory path.")
 
-    target = service_dir
+    target = services_root
     for part in parts:
         target = target / part
         if target.is_symlink():
-            raise FileNotFoundError("Service directory is not available.")
+            raise FileNotFoundError("Services directory is not available.")
 
     try:
-        target.resolve().relative_to(service_dir.resolve())
+        target.resolve().relative_to(services_root.resolve())
     except (OSError, ValueError) as exc:
-        raise FileNotFoundError("Service directory is not available.") from exc
+        raise FileNotFoundError("Services directory is not available.") from exc
     if not target.is_dir():
-        raise FileNotFoundError("Service directory is not available.")
+        raise FileNotFoundError("Services directory is not available.")
 
     entries = []
     try:
         for entry in target.iterdir():
-            if entry.is_symlink():
+            if entry.name.startswith(".") or entry.is_symlink():
                 continue
             if entry.is_dir():
                 entry_type = "directory"
@@ -170,9 +170,15 @@ def list_service_files(service_id: str, relative_path: str = "") -> dict:
                 entry_type = "file"
             else:
                 continue
-            entries.append({"name": entry.name, "type": entry_type})
+            stat = entry.stat(follow_symlinks=False)
+            entries.append({
+                "name": entry.name,
+                "type": entry_type,
+                "size": stat.st_size if entry_type == "file" else None,
+                "modified": int(stat.st_mtime * 1000),
+            })
     except OSError as exc:
-        raise FileNotFoundError("Could not read service directory.") from exc
+        raise FileNotFoundError("Could not read Services directory.") from exc
 
     entries.sort(key=lambda entry: (entry["type"] != "directory", entry["name"].casefold()))
     normalized_path = "/".join(parts)

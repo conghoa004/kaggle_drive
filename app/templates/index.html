@@ -375,13 +375,19 @@
             <i class="fa-solid fa-screwdriver-wrench text-cyan-500"></i>
             <span data-i18n="nav_services">Services</span>
           </h1>
-          <button id="btnRefreshServices" class="btn-secondary text-xs py-2 px-3" onclick="App.refreshServicesPage(true)">
-            <i class="fa-solid fa-rotate"></i> <span data-i18n="services_store_refresh">Refresh</span>
-          </button>
+          <div class="flex items-center gap-2">
+            <button id="btnServicesBack" class="btn-secondary text-xs py-2 px-3" onclick="App.goUpServicesDirectory()" disabled>
+              <i class="fa-solid fa-arrow-up"></i> <span data-i18n="services_folder_up">Up one level</span>
+            </button>
+            <button id="btnRefreshServices" class="btn-secondary text-xs py-2 px-3" onclick="App.refreshServicesPage(true)">
+              <i class="fa-solid fa-rotate"></i> <span data-i18n="services_store_refresh">Refresh</span>
+            </button>
+          </div>
         </div>
-        <p class="text-xs text-slate-500 mb-5" data-i18n="services_store_description">Install and manage services in Kaggle Drive.</p>
-        <div id="servicesStoreBody" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div class="col-span-full flex items-center gap-2 text-sm text-slate-500 py-6">
+        <p class="text-xs text-slate-500 mb-5" data-i18n="services_store_description">Browse the services directory and run scripts inside each service folder.</p>
+        <div id="servicesBreadcrumb" class="flex items-center gap-1.5 text-xs font-mono text-slate-500 mb-3 overflow-x-auto"></div>
+        <div id="servicesStoreBody" class="space-y-1">
+          <div class="flex items-center gap-2 text-sm text-slate-500 py-6">
             <i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>
             <span data-i18n="services_store_loading">Checking services...</span>
           </div>

@@ -187,9 +187,9 @@ const API = {
     return this.request("/api/services");
   },
 
-  getServiceFiles(serviceId, path = "") {
+  getServicesDirectory(path = "") {
     const params = new URLSearchParams({ path });
-    return this.request("/api/services/" + encodeURIComponent(serviceId) + "/files?" + params.toString());
+    return this.request("/api/services/directory?" + params.toString());
   },
 
   runServiceAction(serviceId, action) {
