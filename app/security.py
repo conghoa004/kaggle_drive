@@ -2,6 +2,7 @@ import ipaddress
 import secrets
 import threading
 import time
+from contextvars import ContextVar
 from collections import OrderedDict
 from pathlib import Path
 from fastapi import Request, HTTPException, status
@@ -15,6 +16,19 @@ _LOGIN_CLIENT_LIMIT = 4096
 _LOGIN_FAILURES = OrderedDict()
 _LOGIN_FAILURE_LOCK = threading.Lock()
 LOGIN_LOCKOUT_MESSAGE = "\u0110\u0103ng nh\u1eadp sai qu\xe1 nhi\u1ec1u l\u1ea7n. H\xe3y th\u1eed l\u1ea1i sau 15 ph\xfat."
+_ROOT_DIR_OVERRIDE: ContextVar[Path | None] = ContextVar("root_dir_override", default=None)
+
+
+def get_root_dir() -> Path:
+    return _ROOT_DIR_OVERRIDE.get() or settings.ROOT_DIR
+
+
+def set_root_dir_override(root_dir: Path):
+    return _ROOT_DIR_OVERRIDE.set(Path(root_dir).resolve())
+
+
+def reset_root_dir_override(token) -> None:
+    _ROOT_DIR_OVERRIDE.reset(token)
 
 
 def _login_client_key(request: Request) -> str:
@@ -89,14 +103,15 @@ def clear_login_failures(request: Request) -> None:
 
 def get_safe_path(relative_path: str = "", must_exist: bool = True) -> Path:
     """
-    Validates and resolves a relative path against ROOT_DIR.
+    Validates and resolves a relative path against the active file root.
     Prevents path traversal attacks (e.g., ../../../etc/passwd).
     """
     clean_path = (relative_path or "").strip().lstrip("/\\")
     
     # Resolve the target path
-    target = (settings.ROOT_DIR / clean_path).resolve()
-    root_resolved = settings.ROOT_DIR.resolve()
+    root_dir = get_root_dir()
+    target = (root_dir / clean_path).resolve()
+    root_resolved = root_dir.resolve()
 
     try:
         # Raises ValueError if target is not a subpath of root_resolved

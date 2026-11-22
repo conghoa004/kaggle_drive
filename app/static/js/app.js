@@ -20,13 +20,13 @@ const AppState = {
   services: [],
   servicesError: "",
   serviceTasks: {},
-  servicesDirectory: { path: "", parentPath: null, entries: [], loading: false, error: "" }
+  servicesPath: localStorage.getItem("kaggle_drive_services_path") || "",
+  isServicesMode: false
 };
 
 const App = {
   serviceCredentialsModalData: null,
   serviceCredentialsRequestId: 0,
-  servicesDirectoryRequestId: 0,
 
   init() {
     I18n.init();
@@ -50,9 +50,9 @@ const App = {
     if (portsPage && !portsPage.classList.contains("hidden")) {
       this.renderPortsPage();
     }
-    const servicesPage = document.getElementById("servicesStorePage");
-    if (servicesPage && !servicesPage.classList.contains("hidden")) {
-      this.renderServicesPage();
+    if (AppState.isServicesMode) {
+      this.renderBreadcrumb();
+      this.renderFiles();
     }
     const credentialsModal = document.getElementById("serviceCredentialsModal");
     if (credentialsModal && credentialsModal.classList.contains("show")) {
@@ -166,14 +166,11 @@ const App = {
   },
 
   clearServicesState() {
-    this.servicesDirectoryRequestId += 1;
     AppState.services = [];
     AppState.servicesError = "";
     AppState.serviceTasks = {};
-    AppState.servicesDirectory = { path: "", parentPath: null, entries: [], loading: false, error: "" };
+    AppState.isServicesMode = false;
     this.clearServiceCredentialsModal();
-    const body = document.getElementById("servicesStoreBody");
-    if (body) body.replaceChildren();
   },
 
   clearServiceCredentialsModal() {
@@ -186,7 +183,12 @@ const App = {
   },
 
   openStorageFolder() {
-    this.loadDirectory(AppState.storagePath || "");
+    this.loadDirectory(AppState.storagePath || "", true, "storage");
+  },
+
+  refreshCurrentDirectory() {
+    if (AppState.isServicesMode) return this.refreshServicesPage(true);
+    return this.loadDirectory(AppState.currentPath, false, "storage");
   },
 
   openServicesFolder() {
@@ -318,31 +320,34 @@ const App = {
     this.showLoginView();
   },
 
-  async loadDirectory(path = "", resetSearch = true) {
+  async loadDirectory(path = "", resetSearch = true, mode = "auto") {
     this.hideContextMenu();
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
-    const servicesPage = document.getElementById("servicesStorePage");
+    const serviceNav = document.getElementById("navServices");
+    const isServicesMode = mode === "services" || (mode === "auto" && Boolean(serviceNav && serviceNav.classList.contains("active")));
     if (mainContent) mainContent.classList.remove("hidden");
-    if (servicesPage) {
-      servicesPage.classList.add("hidden");
-      servicesPage.style.display = "none";
-    }
     if (portsPage) {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
     const normalizedPath = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
-    this.setActiveNavigation("navStorage");
-    AppState.storagePath = normalizedPath;
-    try {
-      localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
-    } catch (_) {}
-    AppState.currentPath = path;
-    try {
-      localStorage.setItem("kaggle_drive_current_path", path);
-    } catch (_) {}
+    AppState.isServicesMode = isServicesMode;
+    this.setActiveNavigation(isServicesMode ? "navServices" : "navStorage");
+    AppState.currentPath = normalizedPath;
+    if (isServicesMode) {
+      AppState.servicesPath = normalizedPath;
+      try {
+        localStorage.setItem("kaggle_drive_services_path", normalizedPath);
+      } catch (_) {}
+    } else {
+      AppState.storagePath = normalizedPath;
+      try {
+        localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
+        localStorage.setItem("kaggle_drive_current_path", normalizedPath);
+      } catch (_) {}
+    }
     AppState.selectedItems.clear();
     AppState.lastSelectedPath = null;
     this.updateSelectionBar();
@@ -370,8 +375,8 @@ const App = {
     if (!container) return;
 
     let html = `
-      <span class="breadcrumb-crumb ${!AppState.currentPath ? 'active' : ''}" onclick="App.loadDirectory('')">
-        <i class="fa-solid fa-house-chimney icon-python"></i> working
+      <span class="breadcrumb-crumb ${!AppState.currentPath ? 'active' : ''}" onclick="App.loadDirectory('', true, '${AppState.isServicesMode ? "services" : "storage"}')">
+        <i class="fa-solid ${AppState.isServicesMode ? "fa-folder-tree text-amber-500" : "fa-house-chimney icon-python"}"></i> ${AppState.isServicesMode ? "services" : "working"}
       </span>
     `;
 
@@ -383,7 +388,7 @@ const App = {
         const isLast = idx === parts.length - 1;
         html += `
           <span class="breadcrumb-sep"><i class="fa-solid fa-chevron-right" style="font-size: 10px;"></i></span>
-          <span class="breadcrumb-crumb ${isLast ? 'active' : ''}" onclick="App.loadDirectory('${accum.replace(/'/g, "\\'")}')">
+          <span class="breadcrumb-crumb ${isLast ? 'active' : ''}" onclick="App.loadDirectory('${accum.replace(/'/g, "\\'")}', true, '${AppState.isServicesMode ? "services" : "storage"}')">
             ${UI.escape(part)}
           </span>
         `;
@@ -420,6 +425,43 @@ const App = {
     }
   },
 
+  getServiceActionForFile(item) {
+    if (!AppState.isServicesMode || item.is_dir) return null;
+    const serviceParts = String(AppState.currentPath || "").split("/").filter(Boolean);
+    if (serviceParts.length !== 1) return null;
+    const actions = {
+      "install.sh": "install",
+      "start.sh": "start",
+      "stop.sh": "stop",
+      "uninstall.sh": "uninstall"
+    };
+    const action = actions[item.name];
+    if (!action) return null;
+    const service = AppState.services.find(candidate => candidate.id === serviceParts[0]);
+    const task = service && (AppState.serviceTasks[service.id] || service.task);
+    return {
+      action,
+      service,
+      busy: Boolean(task && task.status === "running"),
+      enabled: Boolean(service && service.supported && !(task && task.status === "running"))
+    };
+  },
+
+  renderServiceActionButton(item, closeItemActions = false, compact = false) {
+    const actionInfo = this.getServiceActionForFile(item);
+    if (!actionInfo) return "";
+    const action = actionInfo.action;
+    const serviceId = String(AppState.currentPath || "").split("/").filter(Boolean)[0];
+    const serviceIdArg = UI.escape(JSON.stringify(serviceId));
+    const actionArg = UI.escape(JSON.stringify(action));
+    const icon = { install: "fa-download", start: "fa-play", stop: "fa-stop", uninstall: "fa-trash-can" }[action];
+    const style = action === "install" ? "primary" : action === "uninstall" ? "danger" : "secondary";
+    if (compact) {
+      return `<button type="button" class="table-btn-action" title="${t("services_action_" + action)}" ${actionInfo.enabled ? "" : "disabled"} onclick="event.stopPropagation(); App.runServiceAction(${serviceIdArg}, ${actionArg})"><i class="fa-solid ${icon}"></i></button>`;
+    }
+    return `<button type="button" onclick="event.stopPropagation(); ${closeItemActions ? "UI.closeModal('itemActionsModal'); " : ""}App.runServiceAction(${serviceIdArg}, ${actionArg})" ${actionInfo.enabled ? "" : "disabled"} class="btn-${style} text-xs py-1.5 px-2.5 inline-flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed" title="${t("services_action_" + action)}"><i class="fa-solid ${icon}"></i><span>${t("services_action_" + action)}</span></button>`;
+  },
+
   renderGridView(items, container) {
     let html = '<div class="file-grid">';
 
@@ -427,6 +469,7 @@ const App = {
       const isSelected = AppState.selectedItems.has(item.path);
       const icon = UI.getIcon(item);
       const safePath = UI.inlineJsString(item.path);
+      const serviceActionButton = this.renderServiceActionButton(item);
 
       html += `
         <div class="file-card ${isSelected ? 'selected' : ''}" 
@@ -446,6 +489,7 @@ const App = {
             <span>${item.formatted_size}</span>
             <span>${item.mtime.split(" ")[0]}</span>
           </div>
+          ${serviceActionButton ? `<div class="mt-2">${serviceActionButton}</div>` : ''}
         </div>
       `;
     });
@@ -476,6 +520,7 @@ const App = {
       const isSelected = AppState.selectedItems.has(item.path);
       const icon = UI.getIcon(item);
       const safePath = UI.inlineJsString(item.path);
+      const serviceActionButton = this.renderServiceActionButton(item, false, true);
 
       html += `
         <tr class="${isSelected ? 'selected' : ''}" 
@@ -499,9 +544,9 @@ const App = {
               ${!item.is_dir ? `
                 <button class="table-btn-action" title="${t("action_download")}" onclick="App.downloadFile('${safePath}')"><i class="fa-solid fa-download"></i></button>
                 <button class="table-btn-action" title="${t("action_preview")}" onclick="App.previewItem('${safePath}')"><i class="fa-solid fa-eye"></i></button>
-                ${(item.extension || "").toLowerCase() === "sh" ? `
+                ${serviceActionButton || ((item.extension || "").toLowerCase() === "sh" ? `
                   <button class="table-btn-action" title="${t("action_run_shell_script")}" onclick="App.runShellScript('${safePath}')"><i class="fa-solid fa-play"></i></button>
-                ` : ''}
+                ` : '')}
                 ${['code', 'text', 'markdown', 'csv'].includes(item.category) ? `
                   <button class="table-btn-action" title="${t("action_edit")}" onclick="Editor.openFile('${safePath}')"><i class="fa-solid fa-pen-to-square"></i></button>
                 ` : ''}
@@ -814,6 +859,7 @@ const App = {
         const isEditable = (['code', 'text', 'markdown'].includes(item.category) || ['csv', 'tsv'].includes((item.extension || '').toLowerCase())) && !['xlsx', 'xls'].includes((item.extension || '').toLowerCase());
         const isArchive = ['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', '7z', 'rar'].includes((item.extension || '').toLowerCase());
         const isShellScript = (item.extension || '').toLowerCase() === 'sh';
+        const serviceAction = this.getServiceActionForFile(item);
 
         let primaryIcon = 'fa-regular fa-eye';
         let primaryLabel = t("action_preview");
@@ -835,7 +881,18 @@ const App = {
           primaryLabel = isXls ? t("action_view_excel") : t("action_view_csv");
         }
 
-        if (isShellScript) {
+        if (isShellScript && serviceAction) {
+          const action = serviceAction.action;
+          const serviceId = String(AppState.currentPath || "").split("/").filter(Boolean)[0];
+          itemsHtml += `
+            <button class="context-menu-item" ${serviceAction.enabled ? "" : "disabled"} onclick="App.hideContextMenu(); App.runServiceAction(${UI.escape(JSON.stringify(serviceId))}, ${UI.escape(JSON.stringify(action))})">
+              <div class="context-item-left">
+                <span class="context-item-icon"><i class="fa-solid ${action === "install" ? "fa-download" : action === "uninstall" ? "fa-trash-can" : action === "start" ? "fa-play" : "fa-stop"}"></i></span>
+                <span>${t("services_action_" + action)}</span>
+              </div>
+            </button>
+          `;
+        } else if (isShellScript) {
           itemsHtml += `
             <button class="context-menu-item" onclick="App.hideContextMenu(); App.runShellScript('${safePath}')">
               <div class="context-item-left">
@@ -1093,13 +1150,13 @@ const App = {
 
   downloadFile(path) {
     this.hideContextMenu();
-    window.location.href = `/api/files/download?path=${encodeURIComponent(path)}`;
+    window.location.href = API.withFileScope(`/api/files/download?path=${encodeURIComponent(path)}`);
   },
 
   downloadZip(path = "") {
     this.hideContextMenu();
     const targetPath = path || AppState.currentPath;
-    window.location.href = `/api/files/download-zip?path=${encodeURIComponent(targetPath)}`;
+    window.location.href = API.withFileScope(`/api/files/download-zip?path=${encodeURIComponent(targetPath)}`);
   },
 
   previewItem(path) {
@@ -1396,14 +1453,15 @@ const App = {
     if (title) title.textContent = item.name;
 
     const safePath = UI.inlineJsString(path);
+    const serviceActionButton = this.renderServiceActionButton(item, true);
     let actions = `
       <div style="display: flex; flex-direction: column; gap: 8px;">
         ${!item.is_dir ? `
-          ${(item.extension || "").toLowerCase() === "sh" ? `
+          ${serviceActionButton || ((item.extension || "").toLowerCase() === "sh" ? `
             <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.runShellScript('${safePath}')">
               <i class="fa-solid fa-play"></i> ${t("action_run_shell_script")}
             </button>
-          ` : ''}
+          ` : '')}
           <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.downloadFile('${safePath}')">
             <i class="fa-solid fa-download"></i> ${t("action_download")}
           </button>
@@ -1622,208 +1680,36 @@ const App = {
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
-    const servicesPage = document.getElementById("servicesStorePage");
-    if (mainContent) mainContent.classList.add("hidden");
+    if (mainContent) mainContent.classList.remove("hidden");
     if (portsPage) {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
-    if (servicesPage) {
-      servicesPage.classList.remove("hidden");
-      servicesPage.style.display = "flex";
-    }
+    AppState.isServicesMode = true;
     this.setActiveNavigation("navServices");
-    AppState.servicesError = "";
-    AppState.servicesDirectory = { path: "", parentPath: null, entries: [], loading: false, error: "" };
     await this.refreshServicesPage(false);
   },
 
   async refreshServicesPage(showToast = false) {
-    const body = document.getElementById("servicesStoreBody");
-    const button = document.getElementById("btnRefreshServices");
-    const originalButton = button && showToast ? button.innerHTML : null;
-    const directoryState = AppState.servicesDirectory;
-    const requestId = ++this.servicesDirectoryRequestId;
-    directoryState.loading = true;
-    directoryState.error = "";
-    if (button && showToast) {
-      button.disabled = true;
-      button.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i> ' + t("services_store_refresh");
-    }
-    if (body) this.renderServicesPage();
-
     try {
-      const [servicesResult, directoryResult] = await Promise.all([
-        API.getServices(),
-        API.getServicesDirectory(directoryState.path || "")
-      ]);
-      if (requestId !== this.servicesDirectoryRequestId) return;
-      AppState.services = servicesResult.services || [];
+      const result = await API.getServices();
+      AppState.services = result.services || [];
       AppState.servicesError = "";
       AppState.services.forEach(service => {
         if (service.task) AppState.serviceTasks[service.id] = service.task;
       });
-      directoryState.path = directoryResult.path || "";
-      directoryState.parentPath = directoryResult.parent_path;
-      directoryState.entries = directoryResult.entries || [];
-      if (showToast) UI.toast(t("services_store_refresh") + " ✓", "success");
     } catch (error) {
-      if (requestId !== this.servicesDirectoryRequestId) return;
       AppState.servicesError = error.message || String(error);
-      directoryState.error = error.message || String(error);
-    } finally {
-      if (requestId === this.servicesDirectoryRequestId) {
-        directoryState.loading = false;
-        this.renderServicesPage();
-      }
-      if (button && originalButton) {
-        button.innerHTML = originalButton;
-        button.disabled = false;
-      }
+      UI.toast(AppState.servicesError, "error");
     }
+
+    if (AppState.isServicesMode) {
+      await this.loadDirectory(AppState.servicesPath || "", false, "services");
+    } else {
+      this.renderFiles();
+    }
+    if (showToast) UI.toast(t("services_store_refresh") + " ✓", "success");
   },
-
-  async navigateServicesDirectory(path = "") {
-    const directoryState = AppState.servicesDirectory;
-    const requestId = ++this.servicesDirectoryRequestId;
-    directoryState.path = path;
-    directoryState.parentPath = null;
-    directoryState.entries = [];
-    directoryState.loading = true;
-    directoryState.error = "";
-    AppState.servicesError = "";
-    this.renderServicesPage();
-
-    try {
-      const result = await API.getServicesDirectory(path);
-      if (requestId !== this.servicesDirectoryRequestId) return;
-      directoryState.path = result.path || "";
-      directoryState.parentPath = result.parent_path;
-      directoryState.entries = result.entries || [];
-    } catch (error) {
-      if (requestId !== this.servicesDirectoryRequestId) return;
-      directoryState.error = error.message || String(error);
-    } finally {
-      if (requestId === this.servicesDirectoryRequestId) {
-        directoryState.loading = false;
-        this.renderServicesPage();
-      }
-    }
-  },
-
-  goUpServicesDirectory() {
-    const parentPath = AppState.servicesDirectory.parentPath;
-    if (typeof parentPath === "string") {
-      return this.navigateServicesDirectory(parentPath);
-    }
-  },
-
-  renderServicesPage() {
-    const body = document.getElementById("servicesStoreBody");
-    const breadcrumb = document.getElementById("servicesBreadcrumb");
-    const backButton = document.getElementById("btnServicesBack");
-    if (!body) return;
-
-    const directoryState = AppState.servicesDirectory;
-    const pathParts = directoryState.path ? directoryState.path.split("/") : [];
-    if (backButton) backButton.disabled = typeof directoryState.parentPath !== "string";
-
-    if (breadcrumb) {
-      let currentPath = "";
-      const crumbs = [{ label: "services", path: "" }];
-      pathParts.forEach(part => {
-        currentPath = currentPath ? currentPath + "/" + part : part;
-        crumbs.push({ label: part, path: currentPath });
-      });
-      breadcrumb.innerHTML = crumbs.map((crumb, index) => {
-        const isLast = index === crumbs.length - 1;
-        const pathArg = UI.escape(JSON.stringify(crumb.path));
-        return (index ? '<i class="fa-solid fa-chevron-right text-[9px] text-slate-400"></i>' : '') +
-          '<button type="button" class="' + (isLast ? 'text-slate-800 font-semibold' : 'hover:text-brand-700') + '" onclick="App.navigateServicesDirectory(' + pathArg + ')">' +
-          (index === 0 ? '<i class="fa-solid fa-folder-tree mr-1 text-amber-500"></i>' : '') + UI.escape(crumb.label) + '</button>';
-      }).join("");
-    }
-
-    if (AppState.servicesError) {
-      body.innerHTML = '<div class="text-sm text-rose-700 p-4 rounded-xl bg-rose-50 border border-rose-100">' +
-        t("services_store_error", { msg: UI.escape(AppState.servicesError) }) +
-        '<div><button class="btn-secondary text-xs py-2 px-3 mt-3" onclick="App.refreshServicesPage(false)">' + t("services_store_retry") + '</button></div></div>';
-      return;
-    }
-    if (directoryState.error) {
-      body.innerHTML = '<div class="text-sm text-rose-700 p-4 rounded-xl bg-rose-50 border border-rose-100">' +
-        t("services_folder_error", { msg: UI.escape(directoryState.error) }) +
-        '<div><button class="btn-secondary text-xs py-2 px-3 mt-3" onclick="App.navigateServicesDirectory(' + UI.escape(JSON.stringify(directoryState.path || "")) + ')">' + t("services_store_retry") + '</button></div></div>';
-      return;
-    }
-    if (directoryState.loading) {
-      body.innerHTML = '<div class="flex items-center gap-2 text-sm text-slate-500 py-6"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i><span>' + t("services_store_loading") + '</span></div>';
-      return;
-    }
-
-    const activeService = pathParts.length === 1
-      ? AppState.services.find(service => service.id === pathParts[0])
-      : null;
-    const serviceTask = activeService && (AppState.serviceTasks[activeService.id] || activeService.task);
-    const serviceBusy = Boolean(serviceTask && serviceTask.status === "running");
-    let serviceSummary = "";
-    if (activeService) {
-      const infoButton = '<button type="button" onclick="App.openServiceCredentials(' + UI.escape(JSON.stringify(activeService.id)) + ')" ' +
-        (activeService.info_available && !serviceBusy ? "" : "disabled") +
-        ' class="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"><i class="fa-solid fa-circle-info text-amber-500"></i>' + t("services_credentials_title") + '</button>';
-      serviceSummary = '<div class="flex flex-wrap items-start justify-between gap-3 p-3 mb-3 rounded-xl border border-slate-200 bg-white">' +
-        '<div><p class="font-semibold text-sm text-slate-800">' + UI.escape(activeService.name || activeService.id) + '</p>' +
-        (activeService.description ? '<p class="text-xs text-slate-500 mt-1">' + UI.escape(activeService.description) + '</p>' : "") +
-        (serviceTask && serviceTask.status === "failed" ? '<p class="text-xs text-rose-600 mt-2">' + t("services_action_failed", { code: Number(serviceTask.return_code || 1) }) + '</p>' : "") +
-        '</div>' + infoButton + '</div>';
-    }
-
-    const actionByFilename = {
-      "install.sh": "install",
-      "start.sh": "start",
-      "stop.sh": "stop",
-      "uninstall.sh": "uninstall"
-    };
-    const actionIcons = { install: "fa-download", start: "fa-play", stop: "fa-stop", uninstall: "fa-trash-can" };
-    const formatSize = bytes => {
-      if (typeof bytes !== "number") return "—";
-      if (bytes < 1024) return bytes + " B";
-      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-      return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-    };
-    const rows = directoryState.entries.map(entry => {
-      const entryPath = directoryState.path ? directoryState.path + "/" + entry.name : entry.name;
-      const entryPathArg = UI.escape(JSON.stringify(entryPath));
-      const icon = entry.type === "directory"
-        ? '<i class="fa-solid fa-folder text-amber-500"></i>'
-        : '<i class="fa-regular fa-file-lines text-slate-400"></i>';
-      const name = entry.type === "directory"
-        ? '<button type="button" class="font-medium text-slate-800 hover:text-brand-700" onclick="App.navigateServicesDirectory(' + entryPathArg + ')">' + UI.escape(entry.name) + '</button>'
-        : '<span class="font-medium text-slate-700">' + UI.escape(entry.name) + '</span>';
-
-      let actionButton = "";
-      const action = pathParts.length === 1 ? actionByFilename[entry.name] : null;
-      if (action && entry.type === "file" && activeService) {
-        const enabled = activeService.supported && !serviceBusy && Boolean(activeService.actions && activeService.actions[action]);
-        actionButton = '<button type="button" onclick="App.runServiceAction(' + UI.escape(JSON.stringify(activeService.id)) + ', \'' + action + '\')" ' +
-          (enabled ? "" : "disabled") + ' class="btn-' + (action === "install" ? "primary" : action === "uninstall" ? "danger" : "secondary") +
-          ' text-xs py-1.5 px-2.5 flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed"><i class="fa-solid ' + actionIcons[action] + '"></i><span>' + t("services_action_" + action) + '</span></button>';
-      }
-
-      const modified = entry.modified ? new Date(entry.modified).toLocaleString() : "—";
-      return '<div class="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 hover:bg-slate-50">' +
-        '<div class="flex min-w-0 flex-1 items-center gap-3">' + icon + '<div class="min-w-0 truncate">' + name + '</div></div>' +
-        '<span class="w-20 text-right text-[11px] text-slate-500">' + (entry.type === "file" ? formatSize(entry.size) : "—") + '</span>' +
-        '<span class="hidden md:block w-40 text-right text-[11px] text-slate-500">' + UI.escape(modified) + '</span>' +
-        '<div class="w-28 flex justify-end">' + actionButton + '</div></div>';
-    }).join("");
-
-    const tableHeader = '<div class="hidden md:flex items-center gap-3 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">' +
-      '<span class="flex-1">' + t("col_name") + '</span><span class="w-20 text-right">' + t("col_size") + '</span>' +
-      '<span class="w-40 text-right">' + t("col_date") + '</span><span class="w-28 text-right">' + t("col_actions") + '</span></div>';
-    body.innerHTML = serviceSummary + tableHeader + (rows || '<div class="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">' + t("services_folder_empty") + '</div>');
-  },
-
   async openServiceCredentials(serviceId) {
     const service = AppState.services.find(item => item.id === serviceId);
     if (!service || !service.credentials_available) return;
@@ -1908,15 +1794,15 @@ const App = {
     }))) return;
 
     AppState.serviceTasks[serviceId] = { service_id: serviceId, action, status: "running" };
-    this.renderServicesPage();
+    this.renderFiles();
     try {
       const task = await API.runServiceAction(serviceId, action);
       AppState.serviceTasks[serviceId] = task;
-      this.renderServicesPage();
+      this.renderFiles();
       await this.waitForServiceTask(task.id);
     } catch (error) {
       delete AppState.serviceTasks[serviceId];
-      this.renderServicesPage();
+      this.renderFiles();
       UI.toast(error.message || String(error), "error");
     }
   },
@@ -1926,7 +1812,7 @@ const App = {
       await new Promise(resolve => setTimeout(resolve, 1200));
       const task = await API.getServiceTask(taskId);
       AppState.serviceTasks[task.service_id] = task;
-      this.renderServicesPage();
+      this.renderFiles();
       if (task.status === "running") continue;
 
       await this.refreshServicesPage(false);
@@ -1944,17 +1830,13 @@ const App = {
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
-    const servicesPage = document.getElementById("servicesStorePage");
     if (mainContent) mainContent.classList.add("hidden");
-    if (servicesPage) {
-      servicesPage.classList.add("hidden");
-      servicesPage.style.display = "none";
-    }
     if (portsPage) {
       portsPage.classList.remove("hidden");
       portsPage.style.display = "flex";
     }
     this.setActiveNavigation("navPorts");
+    AppState.isServicesMode = false;
     await this.refreshPortsPage(false);
   },
 
@@ -2375,6 +2257,7 @@ const App = {
       id: "terminal-" + number,
       title: "Terminal " + number,
       cwd: cwd || "",
+      fileScope: AppState.isServicesMode ? "services" : "storage",
       status: "connecting",
       instance: null,
       fitAddon: null,
@@ -2402,12 +2285,14 @@ const App = {
     this.toggleMobileSidebar(false);
 
     const cwd = targetCwd !== null ? targetCwd : (AppState.currentPath || "");
+    const fileScope = AppState.isServicesMode ? "services" : "storage";
     let tab = targetCwd !== null ? this.createTerminalTab(cwd) : this.getActiveTerminalTab();
-    if (!tab) tab = this.getActiveTerminalTab() || this.createTerminalTab(cwd);
+    if (tab && tab.fileScope !== fileScope) tab = null;
+    if (!tab) tab = this.createTerminalTab(cwd);
+    if (!tab) return;
 
     this.setTerminalMinimized(false);
     UI.openModal("terminalModal");
-    if (!tab) return;
     this.activateTerminalTab(tab.id);
     setTimeout(() => {
       if (this.activeTerminalTabId !== tab.id) return;
@@ -2510,7 +2395,9 @@ const App = {
     }
     if (tab.socket && tab.socket.readyState <= WebSocket.OPEN) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = protocol + "//" + window.location.host + "/api/system/terminal/ws?cwd=" + encodeURIComponent(tab.cwd || "");
+    const terminalParams = new URLSearchParams({ cwd: tab.cwd || "" });
+    if (tab.fileScope === "services") terminalParams.set("scope", "services");
+    const url = protocol + "//" + window.location.host + "/api/system/terminal/ws?" + terminalParams.toString();
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     tab.serverSentTerminalError = false;

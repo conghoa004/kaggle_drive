@@ -3,14 +3,31 @@
    ============================================================ */
 
 const API = {
+  withFileScope(endpoint, fileScope = null) {
+    if (!endpoint.startsWith("/api/files")) {
+      return endpoint;
+    }
+    const url = new URL(endpoint, window.location.origin);
+    const useServices = fileScope
+      ? fileScope === "services"
+      : Boolean(document.getElementById("navServices")?.classList.contains("active"));
+    if (useServices) url.searchParams.set("scope", "services");
+    else url.searchParams.delete("scope");
+    return url.pathname + url.search;
+  },
+
   async request(endpoint, options = {}) {
+    const fileScope = options.fileScope || null;
+    const requestOptions = { ...options };
+    delete requestOptions.fileScope;
+    endpoint = this.withFileScope(endpoint, fileScope);
     const defaultHeaders = {};
     if (options.body && !(options.body instanceof FormData)) {
       defaultHeaders["Content-Type"] = "application/json";
     }
 
     const config = {
-      ...options,
+      ...requestOptions,
       headers: {
         ...defaultHeaders,
         ...(options.headers || {})
@@ -60,8 +77,8 @@ const API = {
     return this.request(`/api/files?${params.toString()}`);
   },
 
-  getFileContent(path) {
-    return this.request(`/api/files/content?path=${encodeURIComponent(path)}`);
+  getFileContent(path, fileScope = null) {
+    return this.request(`/api/files/content?path=${encodeURIComponent(path)}`, { fileScope });
   },
 
   getFileProperties(path) {
@@ -69,17 +86,19 @@ const API = {
     return this.request(`/api/files/properties?${params.toString()}`);
   },
 
-  saveFileContent(path, content) {
+  saveFileContent(path, content, fileScope = null) {
     return this.request("/api/files/content", {
       method: "POST",
-      body: JSON.stringify({ path, content })
+      body: JSON.stringify({ path, content }),
+      fileScope
     });
   },
 
-  saveBinaryFile(path, content_b64) {
+  saveBinaryFile(path, content_b64, fileScope = null) {
     return this.request("/api/files/save-binary", {
       method: "POST",
-      body: JSON.stringify({ path, content_b64 })
+      body: JSON.stringify({ path, content_b64 }),
+      fileScope
     });
   },
 
@@ -153,8 +172,8 @@ const API = {
     });
   },
 
-  async downloadSelectedZip(items) {
-    const response = await fetch("/api/files/download-selected-zip", {
+  async downloadSelectedZip(items, fileScope = null) {
+    const response = await fetch(this.withFileScope("/api/files/download-selected-zip", fileScope), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items })
@@ -185,11 +204,6 @@ const API = {
 
   getServices() {
     return this.request("/api/services");
-  },
-
-  getServicesDirectory(path = "") {
-    const params = new URLSearchParams({ path });
-    return this.request("/api/services/directory?" + params.toString());
   },
 
   runServiceAction(serviceId, action) {

@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import HTTPException, UploadFile, status
 
 from app.config import settings
-from app.security import get_safe_path
+from app.security import get_root_dir, get_safe_path
 
 # Extended MIME types and category classification
 EXTENSION_CATEGORIES = {
@@ -121,7 +121,7 @@ class FileService:
                 ext = item.suffix.lstrip(".") if not is_dir else ""
                 category = "folder" if is_dir else get_file_category(ext)
 
-                rel_item_path = str(item.relative_to(settings.ROOT_DIR)).replace("\\", "/")
+                rel_item_path = str(item.relative_to(get_root_dir())).replace("\\", "/")
 
                 items.append({
                     "name": item.name,
@@ -150,7 +150,7 @@ class FileService:
 
         return {
             "current_path": clean_rel,
-            "root_dir": str(settings.ROOT_DIR),
+            "root_dir": str(get_root_dir()),
             "parent_path": parent_path,
             "folder_name": folder.name if clean_rel else "working",
             "items": items,
@@ -349,7 +349,7 @@ class FileService:
         dest_path = base_folder.joinpath(*parts).resolve()
         try:
             dest_path.relative_to(base_folder.resolve())
-            dest_path.relative_to(settings.ROOT_DIR.resolve())
+            dest_path.relative_to(get_root_dir().resolve())
         except ValueError:
             raise HTTPException(status_code=403, detail="Upload destination escapes the configured root.")
 
@@ -388,7 +388,7 @@ class FileService:
 
         return {
             "filename": dest_path.name,
-            "path": str(dest_path.relative_to(settings.ROOT_DIR.resolve())).replace("\\", "/"),
+            "path": str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/"),
             "size": bytes_written,
             "formatted_size": format_size(bytes_written),
         }
@@ -420,7 +420,7 @@ class FileService:
         target = get_safe_path(rel_path, must_exist=True)
 
         # Prevent deleting ROOT_DIR itself
-        if target.resolve() == settings.ROOT_DIR.resolve():
+        if target.resolve() == get_root_dir().resolve():
             raise HTTPException(status_code=403, detail="Không thể xóa thư mục gốc!")
 
         try:
@@ -452,7 +452,7 @@ class FileService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Lỗi đổi tên: {str(e)}")
 
-        new_rel_path = str(new_target.relative_to(settings.ROOT_DIR)).replace("\\", "/")
+        new_rel_path = str(new_target.relative_to(get_root_dir())).replace("\\", "/")
         return {
             "status": "success",
             "message": f"Đã đổi tên thành '{clean_new_name}'",
@@ -540,14 +540,14 @@ class FileService:
         """Duplicate a file or folder in place."""
         source = get_safe_path(source_rel, must_exist=True)
         dest_folder = source.parent
-        return FileService.copy_item(source_rel, str(dest_folder.relative_to(settings.ROOT_DIR)).replace("\\", "/"))
+        return FileService.copy_item(source_rel, str(dest_folder.relative_to(get_root_dir())).replace("\\", "/"))
 
     @staticmethod
     def create_zip_archive(rel_path: str = ""):
         """Build a size-limited ZIP in a spooled file."""
         target = get_safe_path(rel_path, must_exist=True)
         archive = tempfile.SpooledTemporaryFile(
-            max_size=8 * 1024 * 1024, mode="w+b", dir=settings.ROOT_DIR, prefix=".zip-spool-"
+            max_size=8 * 1024 * 1024, mode="w+b", dir=get_root_dir(), prefix=".zip-spool-"
         )
         entries = 0
         total_bytes = 0
@@ -794,7 +794,7 @@ class FileService:
         return {
             "status": "success",
             "message": f"Extracted {extracted_count} entries to '{dest_dir.name}'.",
-            "destination": str(dest_dir.relative_to(settings.ROOT_DIR)).replace("\\", "/"),
+            "destination": str(dest_dir.relative_to(get_root_dir())).replace("\\", "/"),
         }
 
     @staticmethod
@@ -865,7 +865,7 @@ class FileService:
 
         dest_path = (base_folder / filename).resolve()
         try:
-            dest_path.relative_to(settings.ROOT_DIR.resolve())
+            dest_path.relative_to(get_root_dir().resolve())
         except ValueError:
             raise HTTPException(
                 status_code=403, detail="Download destination is outside configured root."
@@ -966,7 +966,7 @@ class FileService:
             "status": "success",
             "message": f"Downloaded '{filename}' ({format_size(bytes_downloaded)}).",
             "filename": filename,
-            "path": str(dest_path.relative_to(settings.ROOT_DIR)).replace("\\", "/"),
+            "path": str(dest_path.relative_to(get_root_dir())).replace("\\", "/"),
             "size": bytes_downloaded,
         }
 
@@ -977,7 +977,7 @@ class FileService:
             raise HTTPException(status_code=400, detail="No items were selected.")
         targets = [get_safe_path(path, must_exist=True) for path in item_paths]
         archive = tempfile.SpooledTemporaryFile(
-            max_size=8 * 1024 * 1024, mode="w+b", dir=settings.ROOT_DIR, prefix=".zip-spool-"
+            max_size=8 * 1024 * 1024, mode="w+b", dir=get_root_dir(), prefix=".zip-spool-"
         )
         entries = 0
         total_bytes = 0
@@ -1059,7 +1059,7 @@ class FileService:
                 dest = dest_dir / f"{stem}_{counter}.zip"
                 counter += 1
         try:
-            dest.resolve().relative_to(settings.ROOT_DIR.resolve())
+            dest.resolve().relative_to(get_root_dir().resolve())
         except ValueError:
             raise HTTPException(status_code=403, detail="Archive destination is outside configured root.")
         if any(target.resolve() == dest.resolve() for target in targets):
@@ -1133,7 +1133,7 @@ class FileService:
             "status": "success",
             "message": f"Compressed {file_count} files into '{dest.name}'.",
             "archive_name": dest.name,
-            "archive_path": str(dest.relative_to(settings.ROOT_DIR)).replace("\\", "/"),
+            "archive_path": str(dest.relative_to(get_root_dir())).replace("\\", "/"),
             "size": size,
             "formatted_size": format_size(size),
         }

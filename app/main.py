@@ -1,6 +1,7 @@
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import parse_qs
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,8 @@ from app.routes.system_routes import router as system_router
 from app.routes.service_routes import router as service_router
 from app.routes.view_routes import router as view_router
 from app.services.port_service import port_manager
+from app.services.service_manager import get_services_root
+from app.security import reset_root_dir_override, set_root_dir_override
 
 
 @asynccontextmanager
@@ -105,6 +108,26 @@ class RequestBodyLimitMiddleware:
             return
 
 
+class ServicesFileRootMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        is_file_request = path == "/api/files" or path.startswith("/api/files/")
+        is_terminal_request = path == "/api/system/terminal/ws"
+        query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
+        if scope.get("type") not in ("http", "websocket") or not (is_file_request or is_terminal_request) or query.get("scope") != ["services"]:
+            await self.app(scope, receive, send)
+            return
+
+        token = set_root_dir_override(get_services_root())
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_root_dir_override(token)
+
+
 def create_app() -> FastAPI:
     """FastAPI Application Factory."""
     app = FastAPI(
@@ -131,6 +154,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RequestBodyLimitMiddleware)
+    app.add_middleware(ServicesFileRootMiddleware)
 
     static_dir = Path(__file__).resolve().parent / "static"
     if static_dir.exists():

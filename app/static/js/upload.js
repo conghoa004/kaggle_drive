@@ -125,7 +125,7 @@ const Uploader = {
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/files/upload", true);
+      xhr.open("POST", API.withFileScope("/api/files/upload"), true);
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -195,7 +195,7 @@ const Uploader = {
 
           await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open("POST", "/api/files/upload/chunk", true);
+            xhr.open("POST", API.withFileScope("/api/files/upload/chunk"), true);
             xhr.upload.onprogress = (event) => {
               if (event.lengthComputable && progressBar && progressText) {
                 const inFlight = Math.min(blob.size, event.loaded);

@@ -307,7 +307,7 @@
               <i class="fa-solid fa-arrow-left"></i>
               <span data-i18n="go_back">Quay lại</span>
             </button>
-            <button class="btn-tool" onclick="App.loadDirectory(AppState.currentPath)" title="Làm mới danh sách">
+            <button class="btn-tool" onclick="App.refreshCurrentDirectory()" title="Làm mới danh sách">
               <i class="fa-solid fa-rotate"></i>
               <span data-i18n="refresh">Làm mới</span>
             </button>
@@ -368,30 +368,6 @@
 
         <!-- File View Container (Grid or List) -->
         <div id="fileViewContainer" class="flex-1"></div>
-      </main>
-      <main id="servicesStorePage" class="hidden flex-1 flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-3 pb-3 border-b border-slate-200/60">
-          <h1 class="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
-            <i class="fa-solid fa-screwdriver-wrench text-cyan-500"></i>
-            <span data-i18n="nav_services">Services</span>
-          </h1>
-          <div class="flex items-center gap-2">
-            <button id="btnServicesBack" class="btn-secondary text-xs py-2 px-3" onclick="App.goUpServicesDirectory()" disabled>
-              <i class="fa-solid fa-arrow-up"></i> <span data-i18n="services_folder_up">Up one level</span>
-            </button>
-            <button id="btnRefreshServices" class="btn-secondary text-xs py-2 px-3" onclick="App.refreshServicesPage(true)">
-              <i class="fa-solid fa-rotate"></i> <span data-i18n="services_store_refresh">Refresh</span>
-            </button>
-          </div>
-        </div>
-        <p class="text-xs text-slate-500 mb-5" data-i18n="services_store_description">Browse the services directory and run scripts inside each service folder.</p>
-        <div id="servicesBreadcrumb" class="flex items-center gap-1.5 text-xs font-mono text-slate-500 mb-3 overflow-x-auto"></div>
-        <div id="servicesStoreBody" class="space-y-1">
-          <div class="flex items-center gap-2 text-sm text-slate-500 py-6">
-            <i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>
-            <span data-i18n="services_store_loading">Checking services...</span>
-          </div>
-        </div>
       </main>
       <main id="portManagerPage" class="hidden flex-1 flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200/60">

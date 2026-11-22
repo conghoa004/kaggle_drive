@@ -7,7 +7,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 from app.config import settings
 
-from app.security import require_auth, get_safe_path
+from app.security import get_root_dir, require_auth, get_safe_path
 from app.services.file_service import FileService, MEDIA_MIMETYPES
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -251,7 +251,7 @@ def upload_file_chunk(
     dest_path = base_folder.joinpath(*parts).resolve()
     try:
         dest_path.relative_to(base_folder.resolve())
-        dest_path.relative_to(settings.ROOT_DIR.resolve())
+        dest_path.relative_to(get_root_dir().resolve())
     except ValueError:
         raise HTTPException(status_code=403, detail="Upload destination escapes the configured root.")
 
@@ -280,7 +280,7 @@ def upload_file_chunk(
             return {
                 "status": "success",
                 "filename": dest_path.name,
-                "path": str(dest_path.relative_to(settings.ROOT_DIR.resolve())).replace("\\", "/"),
+                "path": str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/"),
                 "size": received,
             }
         return {"status": "partial", "received": received}
