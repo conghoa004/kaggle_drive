@@ -31,6 +31,19 @@ def run_service_action(request: Request, service_id: str, action: str):
         raise HTTPException(status_code=500, detail=f"Could not start service action: {exc}") from exc
 
 
+@router.get("/{service_id}/credentials")
+def get_service_credentials(request: Request, response: Response, service_id: str):
+    require_auth(request)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        credentials = service_manager.get_service_credentials(service_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from exc
+    if credentials is None:
+        raise HTTPException(status_code=404, detail="Service login information is not available.")
+    return {"credentials": credentials}
+
+
 @router.get("/tasks/{task_id}")
 def get_service_task(request: Request, task_id: str):
     require_auth(request)

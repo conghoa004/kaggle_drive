@@ -124,6 +124,12 @@ def _read_credentials(service_id: str, service_dir: Path | None) -> dict | None:
     }
 
 
+def get_service_credentials(service_id: str) -> dict | None:
+    if service_id not in _SERVICE_DEFINITIONS:
+        raise KeyError("Unknown service.")
+    return _read_credentials(service_id, _service_directory(service_id))
+
+
 def _task_payload(task: dict | None) -> dict | None:
     if not task:
         return None
@@ -164,7 +170,7 @@ def list_services() -> list[dict]:
     for service_id, definition in _SERVICE_DEFINITIONS.items():
         service_dir = _service_directory(service_id)
         installed, complete, running, components = states[service_id]
-        credentials = _read_credentials(service_id, service_dir)
+        credentials_available = _read_credentials(service_id, service_dir) is not None
         with _TASK_LOCK:
             task = _TASKS.get(_SERVICE_TASKS.get(service_id))
             task_info = _task_payload(task)
@@ -179,7 +185,7 @@ def list_services() -> list[dict]:
             "running": running,
             "active": bool(components.get("active")),
             "components": components,
-            "credentials": credentials,
+            "credentials_available": credentials_available,
             "supported": supported and scripts_available,
             "task": task_info,
         })

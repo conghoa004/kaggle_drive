@@ -191,6 +191,10 @@ const API = {
     return this.request("/api/services/" + encodeURIComponent(serviceId) + "/" + encodeURIComponent(action), { method: "POST" });
   },
 
+  getServiceCredentials(serviceId) {
+    return this.request("/api/services/" + encodeURIComponent(serviceId) + "/credentials");
+  },
+
   getServiceTask(taskId) {
     return this.request("/api/services/tasks/" + encodeURIComponent(taskId));
   },

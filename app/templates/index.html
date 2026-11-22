@@ -410,6 +410,30 @@
 
   <!-- ================= 3. MODALS & OVERLAYS ================= -->
 
+  <!-- Service Login Information Modal -->
+  <div id="serviceCredentialsModal" class="modal-overlay" onclick="if(event.target === this) App.closeServiceCredentialsModal()">
+    <div class="modal-content max-w-lg">
+      <div class="modal-header">
+        <h3 class="modal-title flex items-center gap-2">
+          <i class="fa-solid fa-key text-amber-500"></i>
+          <span id="serviceCredentialsTitle" data-i18n="services_credentials_title">Thông tin đăng nhập</span>
+        </h3>
+        <button class="modal-close" onclick="App.closeServiceCredentialsModal()" aria-label="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div id="serviceCredentialsBody" class="modal-body">
+        <div class="flex items-center gap-2 text-sm text-slate-500 py-4">
+          <i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>
+          <span data-i18n="services_credentials_loading">Loading login information...</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary text-xs py-2 px-4" onclick="App.closeServiceCredentialsModal()" data-i18n="close">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Global Drag & Drop Overlay -->
   <div id="dragOverlay" class="drag-overlay">
     <div class="drag-box">

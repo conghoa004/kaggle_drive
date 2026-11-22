@@ -25,6 +25,8 @@ const AppState = {
 const App = {
   portTunnelConfirmResolver: null,
   portLocalCloseResolver: null,
+  serviceCredentialsModalData: null,
+  serviceCredentialsRequestId: 0,
 
   init() {
     I18n.init();
@@ -51,6 +53,10 @@ const App = {
     const servicesPage = document.getElementById("servicesStorePage");
     if (servicesPage && !servicesPage.classList.contains("hidden")) {
       this.renderServicesPage();
+    }
+    const credentialsModal = document.getElementById("serviceCredentialsModal");
+    if (credentialsModal && credentialsModal.classList.contains("show")) {
+      if (this.serviceCredentialsModalData) this.renderServiceCredentialsModal();
     }
   },
 
@@ -165,8 +171,18 @@ const App = {
     AppState.services = [];
     AppState.servicesError = "";
     AppState.serviceTasks = {};
+    this.clearServiceCredentialsModal();
     const body = document.getElementById("servicesStoreBody");
     if (body) body.replaceChildren();
+  },
+
+  clearServiceCredentialsModal() {
+    this.serviceCredentialsRequestId += 1;
+    this.serviceCredentialsModalData = null;
+    const body = document.getElementById("serviceCredentialsBody");
+    if (body) body.replaceChildren();
+    const modal = document.getElementById("serviceCredentialsModal");
+    if (modal) modal.classList.remove("show");
   },
 
   openStorageFolder() {
@@ -1721,26 +1737,11 @@ const App = {
           (active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500") + '"><span class="w-1.5 h-1.5 rounded-full ' +
           (active ? "bg-emerald-500" : "bg-slate-300") + '"></span>' + t(componentNames[key] || key) + '</span>')
         .join("");
-      const credentials = service.credentials || {};
-      const credentialFields = [
-        ["url", "services_credential_url"],
-        ["username", "services_credential_username"],
-        ["password", "services_credential_password"],
-        ["host", "services_credential_host"],
-        ["port", "services_credential_port"],
-        ["workspace", "services_credential_workspace"]
-      ].filter(([key]) => credentials[key]);
-      const credentialsPanel = credentialFields.length
-        ? '<div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
-          '<div class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5 mb-2"><i class="fa-solid fa-key text-amber-500"></i>' + t("services_credentials_title") + '</div>' +
-          '<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">' +
-            credentialFields.map(([key, label]) => '<div class="min-w-0"><div class="text-[10px] text-slate-500">' + t(label) + '</div>' +
-              '<div class="text-xs font-mono text-slate-800 break-all select-all cursor-text">' + UI.escape(String(credentials[key])) + '</div></div>').join("") +
-          '</div>' +
-        '</div>'
-        : service.complete
-          ? '<div class="mt-4 text-[11px] text-slate-400">' + t("services_credentials_missing") + '</div>'
-          : "";
+      const credentialsButton = '<button type="button" onclick="App.openServiceCredentials(\'' + service.id + '\')" ' +
+        (service.credentials_available && !busy ? "" : "disabled") +
+        ' title="' + UI.escape(service.credentials_available ? t("services_credentials_title") : t("services_credentials_missing")) + '"' +
+        ' class="btn-secondary text-xs py-2 px-3 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">' +
+        '<i class="fa-solid fa-key text-amber-500"></i><span>' + t("services_credentials_title") + '</span></button>';
 
       const actionButton = (action, enabled, style) => '<button type="button" onclick="App.runServiceAction(\'' + service.id + '\', \'' + action + '\')" ' +
         (enabled ? "" : "disabled") + ' class="' + style + ' disabled:opacity-45 disabled:cursor-not-allowed w-full text-xs py-2 px-2.5 justify-center">' +
@@ -1761,7 +1762,7 @@ const App = {
             '</div><p class="text-xs leading-5 text-slate-500 mt-1.5">' + t(view.description) + '</p></div>' +
           '</div>' +
           '<div class="flex flex-wrap items-center gap-2 mt-4"><span class="text-[11px] font-mono text-slate-500">' + t(view.details) + '</span>' + componentBadges + '</div>' +
-          credentialsPanel +
+          '<div class="mt-4">' + credentialsButton + '</div>' +
           failedNotice +
         '</div>' +
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50/80 border-t border-slate-100">' +
@@ -1774,6 +1775,72 @@ const App = {
     }).join("");
 
     body.innerHTML = cards || '<div class="col-span-full text-sm text-slate-500 p-4 rounded-xl bg-white border border-slate-200">' + t("services_store_empty") + '</div>';
+  },
+
+  async openServiceCredentials(serviceId) {
+    const service = AppState.services.find(item => item.id === serviceId);
+    if (!service || !service.credentials_available) return;
+
+    const requestId = ++this.serviceCredentialsRequestId;
+    this.serviceCredentialsModalData = { serviceId, loading: true };
+    this.renderServiceCredentialsModal();
+    UI.openModal("serviceCredentialsModal");
+
+    try {
+      const result = await API.getServiceCredentials(serviceId);
+      if (requestId !== this.serviceCredentialsRequestId) return;
+      this.serviceCredentialsModalData = { serviceId, credentials: result.credentials || {} };
+      this.renderServiceCredentialsModal();
+    } catch (error) {
+      if (requestId !== this.serviceCredentialsRequestId) return;
+      this.serviceCredentialsModalData = { serviceId, error: error.message || String(error) };
+      this.renderServiceCredentialsModal();
+    }
+  },
+
+  renderServiceCredentialsModal() {
+    const data = this.serviceCredentialsModalData;
+    if (!data) return;
+    const title = document.getElementById("serviceCredentialsTitle");
+    const body = document.getElementById("serviceCredentialsBody");
+    const serviceName = t(data.serviceId === "mysql" ? "services_mysql_name" : "services_coder_name");
+    if (title) title.textContent = t("services_credentials_title") + " — " + serviceName;
+    if (!body) return;
+
+    if (data.loading) {
+      body.innerHTML = '<div class="flex items-center gap-2 text-sm text-slate-500 py-4"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i><span>' + t("services_credentials_loading") + '</span></div>';
+      return;
+    }
+    if (data.error) {
+      body.innerHTML = '<div class="text-sm text-rose-700 p-3 rounded-xl bg-rose-50 border border-rose-100">' +
+        t("services_credentials_error", { msg: UI.escape(data.error) }) + '</div>';
+      return;
+    }
+
+    const credentials = data.credentials || {};
+    const fields = [
+      ["url", "services_credential_url"],
+      ["username", "services_credential_username"],
+      ["password", "services_credential_password"],
+      ["host", "services_credential_host"],
+      ["port", "services_credential_port"],
+      ["workspace", "services_credential_workspace"]
+    ].filter(([key]) => credentials[key]);
+
+    if (!fields.length) {
+      body.innerHTML = '<div class="text-sm text-slate-500 py-2">' + t("services_credentials_missing") + '</div>';
+      return;
+    }
+
+    body.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+      fields.map(([key, label]) => '<div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
+        '<div class="text-[11px] font-semibold text-slate-500 mb-1">' + t(label) + '</div>' +
+        '<div class="text-sm font-mono text-slate-800 break-all select-all cursor-text">' + UI.escape(String(credentials[key])) + '</div></div>').join("") +
+      '</div>';
+  },
+
+  closeServiceCredentialsModal() {
+    UI.closeModal("serviceCredentialsModal");
   },
 
   async runServiceAction(serviceId, action) {
