@@ -74,8 +74,11 @@ fi
 rm -f \
     "$STATE_DIR/config.yaml" \
     "$STATE_DIR/code-server.pid" \
-    "$TMP_DIR/credentials.txt" \
-    "$TMP_DIR/code-server.log"
+    "$TMP_DIR/credentials.txt"
+
+if [[ -d "$TMP_DIR" ]]; then
+    find "$TMP_DIR" -maxdepth 1 -type f -name '*.log' -delete
+fi
 
 if [[ -d "$TMP_DIR" ]]; then
     rmdir "$TMP_DIR" 2>/dev/null || true

@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-CREDENTIAL_FILE="$SCRIPT_DIR/tmp/phpmyadmin_credentials.txt"
+TMP_DIR="$SCRIPT_DIR/tmp"
+CREDENTIAL_FILE="$TMP_DIR/phpmyadmin_credentials.txt"
 PURGE_DATA=false
 
 for arg in "$@"; do
@@ -103,6 +104,10 @@ apt-get purge -y \
 
 apt-get autoremove --purge -y
 
+if [[ -d "$TMP_DIR" ]]; then
+    find "$TMP_DIR" -maxdepth 1 -type f -name '*.log' -delete
+fi
+
 if [[ "$PURGE_DATA" == true ]]; then
     echo "Deleting MySQL database files and generated credentials..."
     rm -rf -- /var/lib/mysql /var/log/mysql
@@ -112,6 +117,10 @@ else
     echo "MySQL data was preserved at /var/lib/mysql (if present)."
     echo "Generated credentials were preserved at $CREDENTIAL_FILE (if present)."
     echo "To remove both, rerun this script with --purge-data."
+fi
+
+if [[ "$PURGE_DATA" == true && -d "$TMP_DIR" ]]; then
+    rmdir "$TMP_DIR" 2>/dev/null || true
 fi
 
 echo "MySQL, Apache, PHP, and phpMyAdmin packages have been removed."
