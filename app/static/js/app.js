@@ -440,6 +440,9 @@ const App = {
               ${!item.is_dir ? `
                 <button class="table-btn-action" title="${t("action_download")}" onclick="App.downloadFile('${safePath}')"><i class="fa-solid fa-download"></i></button>
                 <button class="table-btn-action" title="${t("action_preview")}" onclick="App.previewItem('${safePath}')"><i class="fa-solid fa-eye"></i></button>
+                ${(item.extension || "").toLowerCase() === "sh" ? `
+                  <button class="table-btn-action" title="${t("action_run_shell_script")}" onclick="App.runShellScript('${safePath}')"><i class="fa-solid fa-play"></i></button>
+                ` : ''}
                 ${['code', 'text', 'markdown', 'csv'].includes(item.category) ? `
                   <button class="table-btn-action" title="${t("action_edit")}" onclick="Editor.openFile('${safePath}')"><i class="fa-solid fa-pen-to-square"></i></button>
                 ` : ''}
@@ -751,6 +754,7 @@ const App = {
         const isSpreadsheet = ['spreadsheet', 'csv'].includes(item.category) || ['xlsx', 'xls', 'csv', 'tsv'].includes((item.extension || '').toLowerCase());
         const isEditable = (['code', 'text', 'markdown'].includes(item.category) || ['csv', 'tsv'].includes((item.extension || '').toLowerCase())) && !['xlsx', 'xls'].includes((item.extension || '').toLowerCase());
         const isArchive = ['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', '7z', 'rar'].includes((item.extension || '').toLowerCase());
+        const isShellScript = (item.extension || '').toLowerCase() === 'sh';
 
         let primaryIcon = 'fa-regular fa-eye';
         let primaryLabel = t("action_preview");
@@ -770,6 +774,17 @@ const App = {
           const isXls = ['xlsx', 'xls'].includes((item.extension || '').toLowerCase());
           primaryIcon = isXls ? 'fa-solid fa-file-excel' : 'fa-solid fa-table';
           primaryLabel = isXls ? t("action_view_excel") : t("action_view_csv");
+        }
+
+        if (isShellScript) {
+          itemsHtml += `
+            <button class="context-menu-item" onclick="App.hideContextMenu(); App.runShellScript('${safePath}')">
+              <div class="context-item-left">
+                <span class="context-item-icon"><i class="fa-solid fa-play"></i></span>
+                <span>${t("action_run_shell_script")}</span>
+              </div>
+            </button>
+          `;
         }
 
         if (isEditable) {
@@ -1327,6 +1342,11 @@ const App = {
     let actions = `
       <div style="display: flex; flex-direction: column; gap: 8px;">
         ${!item.is_dir ? `
+          ${(item.extension || "").toLowerCase() === "sh" ? `
+            <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.runShellScript('${safePath}')">
+              <i class="fa-solid fa-play"></i> ${t("action_run_shell_script")}
+            </button>
+          ` : ''}
           <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.downloadFile('${safePath}')">
             <i class="fa-solid fa-download"></i> ${t("action_download")}
           </button>
@@ -2036,6 +2056,7 @@ const App = {
         this.connectTerminal(tab);
       }
     }, 120);
+    return tab;
   },
 
   openNewTerminalTab() {
@@ -2322,7 +2343,7 @@ const App = {
     const socket = tab.socket;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "input", data }));
-    } else if (socket && socket.readyState === WebSocket.CONNECTING) {
+    } else if (!socket || socket.readyState === WebSocket.CONNECTING) {
       tab.pendingInput.push(data);
     }
   },
@@ -2363,10 +2384,34 @@ const App = {
     });
   },
 
-  runTerminalCommand(command) {
-    const tab = this.getActiveTerminalTab();
+  runShellScript(path) {
+    const normalizedPath = String(path || "").replace(/\\/g, "/");
+    const scriptParts = normalizedPath.split("/").filter(part => part && part !== ".");
+    if (!scriptParts.length || scriptParts.includes("..")) return;
+
+    const scriptName = scriptParts.pop();
+    if (!scriptName.toLowerCase().endsWith(".sh")) return;
+
+    const tab = this.openTerminalModal(scriptParts.join("/"));
+    if (!tab) return;
+
+    const cwdParts = String(tab.cwd || "").replace(/\\/g, "/").split("/").filter(part => part && part !== ".");
+    let commonParts = 0;
+    while (commonParts < cwdParts.length && commonParts < scriptParts.length && cwdParts[commonParts] === scriptParts[commonParts]) {
+      commonParts += 1;
+    }
+    const relativePath = [
+      ...Array(cwdParts.length - commonParts).fill(".."),
+      ...scriptParts.slice(commonParts),
+      scriptName
+    ].join("/");
+    const quotedPath = "'" + relativePath.replace(/'/g, "'\\''") + "'";
+    this.runTerminalCommand("bash -- " + quotedPath, tab);
+  },
+
+  runTerminalCommand(command, tab = this.getActiveTerminalTab()) {
     if (!command || !tab || !tab.instance) return;
-    tab.instance.paste(command + "\r");
+    this.sendTerminalInput(command + "\r", tab);
     tab.instance.focus();
   },
 
