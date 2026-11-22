@@ -187,6 +187,11 @@ const API = {
     return this.request("/api/services");
   },
 
+  getServiceFiles(serviceId, path = "") {
+    const params = new URLSearchParams({ path });
+    return this.request("/api/services/" + encodeURIComponent(serviceId) + "/files?" + params.toString());
+  },
+
   runServiceAction(serviceId, action) {
     return this.request("/api/services/" + encodeURIComponent(serviceId) + "/" + encodeURIComponent(action), { method: "POST" });
   },

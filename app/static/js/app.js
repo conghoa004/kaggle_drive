@@ -19,7 +19,8 @@ const AppState = {
   portsError: "",
   services: [],
   servicesError: "",
-  serviceTasks: {}
+  serviceTasks: {},
+  serviceFolders: {}
 };
 
 const App = {
@@ -167,6 +168,7 @@ const App = {
     AppState.services = [];
     AppState.servicesError = "";
     AppState.serviceTasks = {};
+    AppState.serviceFolders = {};
     this.clearServiceCredentialsModal();
     const body = document.getElementById("servicesStoreBody");
     if (body) body.replaceChildren();
@@ -1686,9 +1688,11 @@ const App = {
     const cards = AppState.services.map(service => {
       const serviceIdArg = UI.escape(JSON.stringify(service.id));
       const serviceName = UI.escape(service.name || service.id);
+      const folderName = UI.escape(service.id);
       const description = service.description
         ? '<p class="text-xs leading-5 text-slate-500 mt-1.5">' + UI.escape(service.description) + '</p>'
         : "";
+      const folderState = AppState.serviceFolders[service.id];
       const task = AppState.serviceTasks[service.id] || service.task;
       const busy = Boolean(task && task.status === "running");
       const statusText = !service.supported
@@ -1723,17 +1727,49 @@ const App = {
           (task.log_file ? '<p class="text-[10px] text-slate-500 mt-1 break-all">' + t("services_action_log_file", { path: UI.escape(task.log_file) }) + '</p>' : "")
         : "";
 
+      let folderContents = "";
+      if (folderState && folderState.open) {
+        const folderPath = folderState.path ? folderState.path + "/" : "";
+        const fullPath = "services/" + service.id + "/" + folderPath;
+        const folderHeader = '<div class="flex items-center justify-between gap-2 mb-2">' +
+          '<p class="text-[11px] font-mono text-slate-500 truncate" title="' + UI.escape(fullPath) + '">' + UI.escape(fullPath) + '</p>' +
+          (typeof folderState.parentPath === "string"
+            ? '<button type="button" class="text-xs text-brand-700 hover:text-brand-900" onclick="App.navigateServiceFolder(' + serviceIdArg + ', ' + UI.escape(JSON.stringify(folderState.parentPath)) + ')"><i class="fa-solid fa-arrow-up mr-1"></i>' + t("services_folder_up") + '</button>'
+            : "") +
+          '</div>';
+        if (folderState.loading) {
+          folderContents = '<div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">' + folderHeader +
+            '<div class="flex items-center gap-2 text-xs text-slate-500"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>' + t("services_folder_loading") + '</div></div>';
+        } else if (folderState.error) {
+          folderContents = '<div class="mt-3 rounded-xl border border-rose-100 bg-rose-50 p-3">' + folderHeader +
+            '<p class="text-xs text-rose-700">' + t("services_folder_error", { msg: UI.escape(folderState.error) }) + '</p>' +
+            '<button type="button" class="btn-secondary text-xs py-1.5 px-2 mt-2" onclick="App.navigateServiceFolder(' + serviceIdArg + ', ' + UI.escape(JSON.stringify(folderState.path || "")) + ')">' + t("services_store_retry") + '</button></div>';
+        } else {
+          const rows = (folderState.entries || []).map(entry => {
+            if (entry.type === "directory") {
+              const nextPath = folderState.path ? folderState.path + "/" + entry.name : entry.name;
+              return '<button type="button" class="flex items-center gap-2 w-full text-left rounded-lg px-2.5 py-2 text-xs text-slate-700 hover:bg-cyan-50" onclick="App.navigateServiceFolder(' + serviceIdArg + ', ' + UI.escape(JSON.stringify(nextPath)) + ')">' +
+                '<i class="fa-solid fa-folder text-amber-500"></i><span class="truncate">' + UI.escape(entry.name) + '/</span><i class="fa-solid fa-chevron-right ml-auto text-[10px] text-slate-400"></i></button>';
+            }
+            return '<div class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-slate-600"><i class="fa-regular fa-file-lines text-slate-400"></i><span class="truncate">' + UI.escape(entry.name) + '</span></div>';
+          }).join("");
+          folderContents = '<div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">' + folderHeader +
+            (rows || '<p class="text-xs text-slate-500 py-2">' + t("services_folder_empty") + '</p>') + '</div>';
+        }
+      }
+
       return '<article class="rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition overflow-hidden">' +
         '<div class="p-4 sm:p-5">' +
           '<div class="flex items-start gap-3">' +
-            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg bg-cyan-50 text-cyan-600"><i class="fa-solid fa-cube"></i></div>' +
+            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg bg-amber-50 text-amber-600"><i class="fa-solid fa-folder"></i></div>' +
             '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2">' +
-              '<h2 class="font-bold text-slate-800">' + serviceName + '</h2>' +
+              '<button type="button" class="font-mono font-bold text-slate-800 hover:text-brand-700" onclick="App.toggleServiceFolder(' + serviceIdArg + ')">services/' + folderName + '/</button>' +
               '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + statusClass + '">' +
                 (busy ? '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>' : '') + statusText + '</span>' +
-            '</div>' + description + '<p class="text-[10px] font-mono text-slate-400 mt-1">' + UI.escape(service.id) + '</p></div>' +
+            '</div><p class="text-xs font-semibold text-slate-700 mt-1">' + serviceName + '</p>' + description + '</div>' +
           '</div>' +
           '<div class="mt-4">' + infoButton + '</div>' +
+          folderContents +
           failedNotice +
         '</div>' +
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50/80 border-t border-slate-100">' +
@@ -1743,6 +1779,46 @@ const App = {
     }).join("");
 
     body.innerHTML = cards || '<div class="col-span-full text-sm text-slate-500 p-4 rounded-xl bg-white border border-slate-200">' + t("services_store_empty") + '</div>';
+  },
+
+  async toggleServiceFolder(serviceId) {
+    const current = AppState.serviceFolders[serviceId];
+    if (current && current.open) {
+      current.open = false;
+      this.renderServicesPage();
+      return;
+    }
+    if (current && current.loaded && !current.error) {
+      current.open = true;
+      this.renderServicesPage();
+      return;
+    }
+    await this.navigateServiceFolder(serviceId, current ? current.path : "");
+  },
+
+  async navigateServiceFolder(serviceId, path = "") {
+    const state = AppState.serviceFolders[serviceId] || {};
+    state.open = true;
+    state.loading = true;
+    state.error = "";
+    state.path = path;
+    state.entries = state.entries || [];
+    AppState.serviceFolders[serviceId] = state;
+    this.renderServicesPage();
+
+    try {
+      const result = await API.getServiceFiles(serviceId, path);
+      state.path = result.path || "";
+      state.parentPath = result.parent_path;
+      state.entries = result.entries || [];
+      state.loaded = true;
+    } catch (error) {
+      state.error = error.message || String(error);
+      state.loaded = false;
+    } finally {
+      state.loading = false;
+      this.renderServicesPage();
+    }
   },
 
   async openServiceCredentials(serviceId) {

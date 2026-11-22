@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from app.security import require_auth
 from app.services import service_manager
@@ -42,6 +42,23 @@ def get_service_credentials(request: Request, response: Response, service_id: st
     if credentials is None:
         raise HTTPException(status_code=404, detail="Service information is not available.")
     return {"credentials": credentials}
+
+
+@router.get("/{service_id}/files")
+def get_service_files(
+    request: Request,
+    response: Response,
+    service_id: str,
+    path: str = Query(default=""),
+):
+    require_auth(request)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return service_manager.list_service_files(service_id, path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/tasks/{task_id}")
