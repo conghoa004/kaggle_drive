@@ -4,6 +4,8 @@
    ============================================================ */
 
 const UI = {
+  confirmationResolver: null,
+
   // Toast Notification System
   toast(message, type = "info", duration = 3200) {
     const container = document.getElementById("toastContainer");
@@ -42,7 +44,42 @@ const UI = {
     }
   },
 
+  confirm(options = {}) {
+    const modal = document.getElementById("confirmationModal");
+    if (!modal || this.confirmationResolver) return Promise.resolve(false);
+
+    const title = document.getElementById("confirmationTitle");
+    const message = document.getElementById("confirmationMessage");
+    const cancelButton = document.getElementById("confirmationCancelButton");
+    const confirmButton = document.getElementById("confirmationConfirmButton");
+    const confirmLabel = confirmButton && confirmButton.querySelector("span");
+    const actionIcon = document.getElementById("confirmationActionIcon");
+    if (title) title.textContent = options.title || t("confirm_title");
+    if (message) message.textContent = options.message || "";
+    if (cancelButton) cancelButton.textContent = options.cancelText || t("cancel");
+    if (confirmLabel) confirmLabel.textContent = options.confirmText || t("confirm");
+    if (actionIcon) actionIcon.className = "fa-solid " + (options.confirmIcon || "fa-check");
+
+    return new Promise(resolve => {
+      this.confirmationResolver = resolve;
+      this.openModal("confirmationModal");
+      if (cancelButton) setTimeout(() => cancelButton.focus(), 80);
+    });
+  },
+
+  resolveConfirmation(confirmed) {
+    const resolve = this.confirmationResolver;
+    this.confirmationResolver = null;
+    const modal = document.getElementById("confirmationModal");
+    if (modal) modal.classList.remove("show");
+    if (resolve) resolve(Boolean(confirmed));
+  },
+
   closeModal(modalId) {
+    if (modalId === "confirmationModal") {
+      this.resolveConfirmation(false);
+      return;
+    }
     if (modalId === "previewModal" && window.Previewer && typeof window.Previewer.closePreview === "function") {
       window.Previewer.closePreview();
       return;
@@ -61,6 +98,11 @@ const UI = {
   },
 
   closeAllModals() {
+    const confirmationModal = document.getElementById("confirmationModal");
+    if (confirmationModal && confirmationModal.classList.contains("show")) {
+      this.resolveConfirmation(false);
+      return;
+    }
     const unsavedModal = document.getElementById("unsavedChangesModal");
     if (unsavedModal && unsavedModal.classList.contains("show")) {
       this.closeModal("unsavedChangesModal");

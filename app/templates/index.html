@@ -434,6 +434,31 @@
     </div>
   </div>
 
+  <!-- Shared Confirmation Modal -->
+  <div id="confirmationModal" class="modal-overlay" onclick="if(event.target === this) UI.resolveConfirmation(false)">
+    <div class="modal-content max-w-md">
+      <div class="modal-header">
+        <h3 class="modal-title text-red-600">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span id="confirmationTitle" data-i18n="confirm_title">Confirm</span>
+        </h3>
+        <button class="modal-close" onclick="UI.resolveConfirmation(false)" aria-label="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmationMessage" class="text-sm text-slate-600 leading-relaxed"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="confirmationCancelButton" class="btn-secondary text-xs py-2 px-4" onclick="UI.resolveConfirmation(false)" data-i18n="cancel">Cancel</button>
+        <button id="confirmationConfirmButton" class="btn-danger text-xs py-2 px-4" onclick="UI.resolveConfirmation(true)">
+          <i id="confirmationActionIcon" class="fa-solid fa-check"></i>
+          <span data-i18n="confirm">Confirm</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Global Drag & Drop Overlay -->
   <div id="dragOverlay" class="drag-overlay">
     <div class="drag-box">
@@ -764,76 +789,6 @@
     </div>
   </div>
 
-  <!-- Delete Confirm Modal -->
-  <div id="deleteModal" class="modal-overlay">
-    <div class="modal-content max-w-sm">
-      <div class="modal-header">
-        <h3 class="modal-title text-red-600"><i class="fa-solid fa-trash-can"></i> <span data-i18n="delete_modal_title">Xác nhận xóa</span></h3>
-        <button class="modal-close" onclick="UI.closeModal('deleteModal')"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="deleteTargetData">
-        <p id="deleteConfirmMsg" class="text-xs sm:text-sm text-slate-600" data-i18n="delete_confirm_single">Bạn có chắc chắn muốn xóa mục đã chọn không? Thao tác này không thể hoàn tác.</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary text-xs py-2 px-4" onclick="UI.closeModal('deleteModal')" data-i18n="cancel">Hủy</button>
-        <button class="btn-danger text-xs py-2 px-4" onclick="App.confirmDelete()">
-          <i class="fa-solid fa-trash-can"></i> <span data-i18n="delete_btn_permanent">Xóa vĩnh viễn</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Application Port Tunnel Confirmation Modal -->
-  <div id="portTunnelConfirmModal" class="modal-overlay" onclick="if(event.target === this) App.resolveApplicationTunnelClose(false)">
-    <div class="modal-content max-w-md">
-      <div class="modal-header">
-        <h3 class="modal-title text-red-600">
-          <i class="fa-solid fa-triangle-exclamation"></i>
-          <span data-i18n="port_application_tunnel_title">Confirm Close Tunnel</span>
-        </h3>
-        <button class="modal-close" onclick="App.resolveApplicationTunnelClose(false)" aria-label="Cancel">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p id="portTunnelConfirmMessage" class="text-sm text-slate-600 leading-relaxed"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary text-xs py-2 px-4" onclick="App.resolveApplicationTunnelClose(false)" data-i18n="cancel">Cancel</button>
-        <button class="btn-danger text-xs py-2 px-4" onclick="App.resolveApplicationTunnelClose(true)">
-          <i class="fa-solid fa-cloud-arrow-down"></i>
-          <span data-i18n="port_tunnel_close">Close tunnel</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Local Port Close Confirmation Modal -->
-  <div id="portLocalCloseConfirmModal" class="modal-overlay" onclick="if(event.target === this) App.resolveLocalPortClose(false)">
-    <div class="modal-content max-w-md">
-      <div class="modal-header">
-        <h3 class="modal-title text-red-600">
-          <i class="fa-solid fa-triangle-exclamation"></i>
-          <span data-i18n="port_local_close_title">Confirm Close Port</span>
-        </h3>
-        <button class="modal-close" onclick="App.resolveLocalPortClose(false)" aria-label="Cancel">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p id="portLocalCloseMessage" class="text-sm text-slate-600 leading-relaxed"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary text-xs py-2 px-4" onclick="App.resolveLocalPortClose(false)" data-i18n="cancel">Cancel</button>
-        <button class="btn-danger text-xs py-2 px-4" onclick="App.resolveLocalPortClose(true)">
-          <i class="fa-solid fa-power-off"></i>
-          <span data-i18n="port_local_close">Close port</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
   <!-- Compress Modal -->
   <div id="compressModal" class="modal-overlay">
     <div class="modal-content max-w-sm">
@@ -859,29 +814,27 @@
 
   <!-- Unsaved Changes Confirm Modal -->
   <div id="unsavedChangesModal" class="modal-overlay" style="z-index: 9999 !important;">
-    <div class="modal-content max-w-sm" style="background: #0f172a; border: 1px solid rgba(255,255,255,0.14); border-radius: 14px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
-      <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.08); padding: 14px 18px;">
-        <h3 class="modal-title flex items-center gap-2" style="color: #f59e0b; font-size: 14px; font-weight: 700;">
+    <div class="modal-content max-w-md">
+      <div class="modal-header">
+        <h3 class="modal-title text-red-600">
           <i class="fa-solid fa-triangle-exclamation"></i>
-          <span id="unsavedModalTitle">Thay đổi chưa được lưu</span>
+          <span id="unsavedModalTitle" data-i18n="unsaved_title">Thay đổi chưa được lưu</span>
         </h3>
-        <button class="modal-close" style="color: #94a3b8;" onclick="UI.closeModal('unsavedChangesModal')"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close" onclick="UI.closeModal('unsavedChangesModal')"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div id="unsavedChangesBody" class="modal-body text-xs sm:text-sm leading-relaxed py-3 px-4" style="color: #cbd5e1;">
+      <div id="unsavedChangesBody" class="modal-body text-sm text-slate-600 leading-relaxed">
         Bảng tính có các thay đổi chưa được lưu vào máy chủ. Bạn có muốn lưu thay đổi trước khi đóng không?
       </div>
-      <div class="modal-footer flex items-center justify-between gap-2" style="border-top: 1px solid rgba(255,255,255,0.08); padding: 12px 18px; background: rgba(15, 23, 42, 0.4);">
-        <button class="btn-secondary text-xs py-2 px-3" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); color: #cbd5e1;" onclick="UI.closeModal('unsavedChangesModal')">
+      <div class="modal-footer flex-wrap">
+        <button class="btn-secondary text-xs py-2 px-3" onclick="UI.closeModal('unsavedChangesModal')" data-i18n="unsaved_continue_editing">
           Tiếp tục sửa
         </button>
-        <div class="flex items-center gap-2">
-          <button id="unsavedDiscardBtn" class="btn-danger text-xs py-2 px-3" onclick="Previewer.discardAndClose()">
+        <button id="unsavedDiscardBtn" class="btn-danger text-xs py-2 px-3" onclick="Previewer.discardAndClose()" data-i18n="unsaved_discard">
             Không lưu
-          </button>
-          <button id="unsavedSaveBtn" class="btn-primary text-xs py-2 px-3.5" onclick="Previewer.saveAndClose()">
-            <i class="fa-solid fa-floppy-disk mr-1"></i> Lưu & Đóng
-          </button>
-        </div>
+        </button>
+        <button id="unsavedSaveBtn" class="btn-primary text-xs py-2 px-3.5" onclick="Previewer.saveAndClose()">
+          <i class="fa-solid fa-floppy-disk mr-1"></i> <span data-i18n="unsaved_save_close">Lưu & Đóng</span>
+        </button>
       </div>
     </div>
   </div>

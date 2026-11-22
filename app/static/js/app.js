@@ -23,8 +23,6 @@ const AppState = {
 };
 
 const App = {
-  portTunnelConfirmResolver: null,
-  portLocalCloseResolver: null,
   serviceCredentialsModalData: null,
   serviceCredentialsRequestId: 0,
 
@@ -72,11 +70,6 @@ const App = {
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         this.hideContextMenu();
-        const portConfirmModal = document.getElementById("portTunnelConfirmModal");
-        if (portConfirmModal && portConfirmModal.classList.contains("show")) {
-          this.resolveApplicationTunnelClose(false);
-          return;
-        }
         const unsavedModal = document.getElementById("unsavedChangesModal");
         if (unsavedModal && unsavedModal.classList.contains("show")) {
           UI.closeModal("unsavedChangesModal");
@@ -1240,27 +1233,25 @@ const App = {
     }
   },
 
-  promptDelete(path = null) {
+  async promptDelete(path = null) {
     this.hideContextMenu();
     const itemsToDelete = path ? [path] : Array.from(AppState.selectedItems);
     if (!itemsToDelete.length) return;
 
-    const msgEl = document.getElementById("deleteConfirmMsg");
-    if (msgEl) {
-      msgEl.textContent = itemsToDelete.length === 1
-        ? t("delete_confirm_single")
-        : t("delete_confirm_multi", { count: itemsToDelete.length });
-    }
-    document.getElementById("deleteTargetData").value = JSON.stringify(itemsToDelete);
-    UI.openModal("deleteModal");
+    const message = itemsToDelete.length === 1
+      ? t("delete_confirm_single")
+      : t("delete_confirm_multi", { count: itemsToDelete.length });
+    const confirmed = await UI.confirm({
+      title: t("delete_modal_title"),
+      message,
+      confirmText: t("delete_btn_permanent"),
+      confirmIcon: "fa-trash-can"
+    });
+    if (confirmed) await this.confirmDelete(itemsToDelete);
   },
 
-  async confirmDelete() {
-    const itemsStr = document.getElementById("deleteTargetData").value;
-    if (!itemsStr) return;
-    const items = JSON.parse(itemsStr);
-
-    UI.closeModal("deleteModal");
+  async confirmDelete(items) {
+    if (!Array.isArray(items) || !items.length) return;
     let successCount = 0;
 
     for (const itemPath of items) {
@@ -1688,7 +1679,7 @@ const App = {
         name: "services_coder_name",
         description: "services_coder_description",
         details: "services_coder_details",
-        iconHtml: '<svg viewBox="0 0 24 24" class="w-7 h-7" aria-hidden="true"><path fill="#0065A9" d="M18.2 2.4 9 10.5 4.1 6.8 1 8.1v7.8l3.1 1.3L9 13.5l9.2 8.1L23 19V5z"/><path fill="#007ACC" d="M18.2 2.4V21.6L23 19V5z"/><path fill="#1F9CF0" d="m4.1 6.8-3.1 1.3v7.8l3.1 1.3L9 13.5l9.2 8.1V2.4L9 10.5z"/></svg>',
+        iconHtml: '<img src="https://code.visualstudio.com/assets/branding/code-stable.png" class="w-8 h-8 object-contain" alt="" onerror="this.hidden=true;this.nextElementSibling.classList.remove(&quot;hidden&quot;)"><i class="fa-solid fa-laptop-code text-blue-600 text-xl hidden"></i>',
         iconClass: "bg-blue-50",
         accent: "border-indigo-100"
       }
@@ -1848,7 +1839,12 @@ const App = {
     const service = AppState.services.find(item => item.id === serviceId);
     if (!service) return;
     const serviceName = t(serviceId === "mysql" ? "services_mysql_name" : "services_coder_name");
-    if (action === "uninstall" && !window.confirm(t("services_uninstall_confirm", { name: serviceName }))) return;
+    if (action === "uninstall" && !(await UI.confirm({
+      title: t("services_uninstall_title"),
+      message: t("services_uninstall_confirm", { name: serviceName }),
+      confirmText: t("services_action_uninstall"),
+      confirmIcon: "fa-trash-can"
+    }))) return;
 
     AppState.serviceTasks[serviceId] = { service_id: serviceId, action, status: "running" };
     this.renderServicesPage();
@@ -1981,46 +1977,22 @@ const App = {
   },
 
   confirmApplicationTunnelClose(port) {
-    return new Promise(resolve => {
-      if (this.portTunnelConfirmResolver) {
-        resolve(false);
-        return;
-      }
-      this.portTunnelConfirmResolver = resolve;
-      const message = document.getElementById("portTunnelConfirmMessage");
-      if (message) message.textContent = t("port_application_tunnel_confirm", { port });
-      UI.openModal("portTunnelConfirmModal");
+    return UI.confirm({
+      title: t("port_application_tunnel_title"),
+      message: t("port_application_tunnel_confirm", { port }),
+      confirmText: t("port_tunnel_close"),
+      confirmIcon: "fa-cloud-arrow-down"
     });
-  },
-
-  resolveApplicationTunnelClose(confirmed) {
-    const resolve = this.portTunnelConfirmResolver;
-    this.portTunnelConfirmResolver = null;
-    UI.closeModal("portTunnelConfirmModal");
-    if (resolve) resolve(Boolean(confirmed));
   },
 
   confirmLocalPortClose(port, processName, isApplication) {
-    return new Promise(resolve => {
-      if (this.portLocalCloseResolver) {
-        resolve(false);
-        return;
-      }
-      this.portLocalCloseResolver = resolve;
-      const message = document.getElementById("portLocalCloseMessage");
-      if (message) {
-        const key = isApplication ? "port_application_local_close_confirm" : "port_local_close_confirm";
-        message.textContent = t(key, { port, process: processName });
-      }
-      UI.openModal("portLocalCloseConfirmModal");
+    const key = isApplication ? "port_application_local_close_confirm" : "port_local_close_confirm";
+    return UI.confirm({
+      title: t("port_local_close_title"),
+      message: t(key, { port, process: processName }),
+      confirmText: t("port_local_close"),
+      confirmIcon: "fa-power-off"
     });
-  },
-
-  resolveLocalPortClose(confirmed) {
-    const resolve = this.portLocalCloseResolver;
-    this.portLocalCloseResolver = null;
-    UI.closeModal("portLocalCloseConfirmModal");
-    if (resolve) resolve(Boolean(confirmed));
   },
 
   async togglePortTunnel(portValue) {

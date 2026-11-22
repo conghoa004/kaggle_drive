@@ -37,9 +37,14 @@ const Previewer = {
     const discardBtn = document.getElementById("unsavedDiscardBtn");
     const saveBtn = document.getElementById("unsavedSaveBtn");
 
-    if (title) title.textContent = "Thay đổi chưa được lưu";
+    if (title) title.textContent = t("unsaved_title");
     if (body) {
-      body.textContent = "Bảng tính có các thay đổi chưa được lưu vào máy chủ. Bạn có muốn lưu thay đổi trước khi đóng không?";
+      body.textContent = t("spreadsheet_dirty_confirm");
+    }
+    if (discardBtn) discardBtn.textContent = t("unsaved_discard");
+    if (saveBtn) {
+      const saveLabel = saveBtn.querySelector("span");
+      if (saveLabel) saveLabel.textContent = t("unsaved_save_close");
     }
     if (discardBtn) {
       discardBtn.onclick = () => Previewer.discardAndClose();
