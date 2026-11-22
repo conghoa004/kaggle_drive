@@ -2214,9 +2214,7 @@ const App = {
     this.toggleMobileSidebar(false);
 
     const cwd = targetCwd !== null ? targetCwd : (AppState.currentPath || "");
-    const fileScope = AppState.isServicesMode ? "services" : "storage";
     let tab = targetCwd !== null ? this.createTerminalTab(cwd) : this.getActiveTerminalTab();
-    if (tab && tab.fileScope !== fileScope) tab = null;
     if (!tab) tab = this.createTerminalTab(cwd);
     if (!tab) return;
 
