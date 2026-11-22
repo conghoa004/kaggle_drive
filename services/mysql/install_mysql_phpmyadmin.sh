@@ -10,6 +10,23 @@ LOG_FILE="$TMP_DIR/mysql_phpmyadmin_install.log"
 CREDENTIAL_FILE="$TMP_DIR/phpmyadmin_credentials.txt"
 
 APACHE_PORT="8081"
+INSTALL_ONLY=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --install-only)
+            INSTALL_ONLY=true
+            ;;
+        -h|--help)
+            echo "Usage: bash install_mysql_phpmyadmin.sh [--install-only]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $arg"
+            exit 1
+            ;;
+    esac
+done
 
 # Create required directories before initializing logging
 mkdir -p "$TMP_DIR"
@@ -337,3 +354,9 @@ echo ""
 echo "========================================="
 echo "All installation tasks completed."
 echo "========================================="
+
+if [[ "$INSTALL_ONLY" == true ]]; then
+    echo "Stopping MySQL and Apache after installation..."
+    bash "$SCRIPT_DIR/stop_mysql_phpmyadmin.sh"
+    echo "Installation complete. Services are stopped; start them from the Services store."
+fi

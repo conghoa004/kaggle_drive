@@ -5,7 +5,6 @@
 const AppState = {
   currentPath: localStorage.getItem("kaggle_drive_current_path") || "",
   storagePath: localStorage.getItem("kaggle_drive_storage_path") || "",
-  servicesPath: localStorage.getItem("kaggle_drive_services_path") || "",
   parentPath: null,
   rootDir: "",
   files: [],
@@ -17,7 +16,10 @@ const AppState = {
   searchQuery: "",
   systemStats: null,
   ports: [],
-  portsError: ""
+  portsError: "",
+  services: [],
+  servicesError: "",
+  serviceTasks: {}
 };
 
 const App = {
@@ -45,6 +47,10 @@ const App = {
     const portsPage = document.getElementById("portManagerPage");
     if (portsPage && !portsPage.classList.contains("hidden")) {
       this.renderPortsPage();
+    }
+    const servicesPage = document.getElementById("servicesStorePage");
+    if (servicesPage && !servicesPage.classList.contains("hidden")) {
+      this.renderServicesPage();
     }
   },
 
@@ -159,25 +165,7 @@ const App = {
   },
 
   openServicesFolder() {
-    const normalizePath = value => String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
-    const rootPath = normalizePath(AppState.rootDir || "/");
-    const targetPath = "kaggle/working/kaggle_drive/services";
-    let relativePath;
-
-    if (!rootPath) {
-      relativePath = targetPath;
-    } else if (rootPath === targetPath) {
-      relativePath = "";
-    } else if (targetPath.startsWith(rootPath + "/")) {
-      relativePath = targetPath.slice(rootPath.length + 1);
-    } else {
-      UI.toast(t("services_folder_outside_root"), "error");
-      return;
-    }
-
-    const rememberedPath = normalizePath(AppState.servicesPath);
-    const rememberedPathIsInServices = !relativePath || rememberedPath === relativePath || rememberedPath.startsWith(relativePath + "/");
-    this.loadDirectory(rememberedPath && rememberedPathIsInServices ? rememberedPath : relativePath);
+    this.openServicesPage();
   },
 
   async checkAuthStatus() {
@@ -302,30 +290,22 @@ const App = {
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
+    const servicesPage = document.getElementById("servicesStorePage");
     if (mainContent) mainContent.classList.remove("hidden");
+    if (servicesPage) {
+      servicesPage.classList.add("hidden");
+      servicesPage.style.display = "none";
+    }
     if (portsPage) {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
-    const normalizePath = value => String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
-    const normalizedPath = normalizePath(path);
-    const normalizedRoot = normalizePath(AppState.rootDir || "/");
-    const fullPath = [normalizedRoot, normalizedPath].filter(Boolean).join("/");
-    const servicesPath = "kaggle/working/kaggle_drive/services";
-    const isServicesPath = normalizedPath === "services" || normalizedPath.startsWith("services/") ||
-      fullPath === servicesPath || fullPath.startsWith(servicesPath + "/");
-    this.setActiveNavigation(isServicesPath ? "navServices" : "navStorage");
-    if (isServicesPath) {
-      AppState.servicesPath = normalizedPath;
-      try {
-        localStorage.setItem("kaggle_drive_services_path", normalizedPath);
-      } catch (_) {}
-    } else {
-      AppState.storagePath = normalizedPath;
-      try {
-        localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
-      } catch (_) {}
-    }
+    const normalizedPath = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    this.setActiveNavigation("navStorage");
+    AppState.storagePath = normalizedPath;
+    try {
+      localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
+    } catch (_) {}
     AppState.currentPath = path;
     try {
       localStorage.setItem("kaggle_drive_current_path", path);
@@ -1607,11 +1587,213 @@ const App = {
     }
   },
 
+  async openServicesPage() {
+    this.toggleMobileSidebar(false);
+    const mainContent = document.getElementById("mainContentArea");
+    const portsPage = document.getElementById("portManagerPage");
+    const servicesPage = document.getElementById("servicesStorePage");
+    if (mainContent) mainContent.classList.add("hidden");
+    if (portsPage) {
+      portsPage.classList.add("hidden");
+      portsPage.style.display = "none";
+    }
+    if (servicesPage) {
+      servicesPage.classList.remove("hidden");
+      servicesPage.style.display = "flex";
+    }
+    this.setActiveNavigation("navServices");
+    await this.refreshServicesPage(false);
+  },
+
+  async refreshServicesPage(showToast = false) {
+    const body = document.getElementById("servicesStoreBody");
+    const button = document.getElementById("btnRefreshServices");
+    const originalButton = button && showToast ? button.innerHTML : null;
+    if (button && showToast) {
+      button.disabled = true;
+      button.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i> ' + t("services_store_refresh");
+    }
+    if (body && !AppState.services.length && !AppState.servicesError) {
+      body.innerHTML = '<div class="col-span-full flex items-center gap-2 text-sm text-slate-500 py-6"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i><span>' + t("services_store_loading") + '</span></div>';
+    }
+
+    try {
+      const result = await API.getServices();
+      AppState.services = result.services || [];
+      AppState.servicesError = "";
+      AppState.services.forEach(service => {
+        if (service.task) AppState.serviceTasks[service.id] = service.task;
+      });
+      this.renderServicesPage();
+      if (showToast) UI.toast(t("services_store_refresh") + " ✓", "success");
+    } catch (error) {
+      AppState.servicesError = error.message || String(error);
+      this.renderServicesPage();
+    } finally {
+      if (button && originalButton) {
+        button.innerHTML = originalButton;
+        button.disabled = false;
+      }
+    }
+  },
+
+  renderServicesPage() {
+    const body = document.getElementById("servicesStoreBody");
+    if (!body) return;
+
+    if (AppState.servicesError) {
+      body.innerHTML = '<div class="col-span-full text-sm text-rose-700 p-4 rounded-xl bg-rose-50 border border-rose-100">' +
+        t("services_store_error", { msg: UI.escape(AppState.servicesError) }) +
+        '<div><button class="btn-secondary text-xs py-2 px-3 mt-3" onclick="App.refreshServicesPage(false)">' + t("services_store_retry") + '</button></div>' +
+      '</div>';
+      return;
+    }
+
+    const presentation = {
+      mysql: {
+        name: "services_mysql_name",
+        description: "services_mysql_description",
+        details: "services_mysql_details",
+        icon: "fa-database",
+        iconClass: "bg-orange-50 text-orange-600",
+        accent: "border-orange-100"
+      },
+      "code-server": {
+        name: "services_coder_name",
+        description: "services_coder_description",
+        details: "services_coder_details",
+        icon: "fa-code",
+        iconClass: "bg-indigo-50 text-indigo-600",
+        accent: "border-indigo-100"
+      }
+    };
+    const componentNames = {
+      mysql: "services_component_mysql",
+      apache: "services_component_apache",
+      phpmyadmin: "services_component_phpmyadmin",
+      "code-server": "services_component_code_server"
+    };
+    const actionIcons = {
+      install: "fa-download",
+      start: "fa-play",
+      stop: "fa-stop",
+      uninstall: "fa-trash-can"
+    };
+
+    const cards = AppState.services.map(service => {
+      const view = presentation[service.id];
+      if (!view) return "";
+      const task = AppState.serviceTasks[service.id] || service.task;
+      const busy = Boolean(task && task.status === "running");
+      const statusText = !service.supported
+        ? t("services_unsupported")
+        : busy
+          ? t("services_action_busy", { action: t("services_action_" + task.action).toLowerCase() })
+          : service.running
+            ? t("services_running")
+            : service.active
+              ? t("services_partial")
+              : service.installed && !service.complete
+                ? t("services_partial_install")
+              : service.installed
+                ? t("services_installed")
+                : t("services_not_installed");
+      const statusClass = busy || service.running
+        ? "bg-emerald-50 text-emerald-700"
+        : service.active || (service.installed && !service.complete)
+          ? "bg-amber-50 text-amber-700"
+          : service.installed
+            ? "bg-slate-100 text-slate-600"
+            : "bg-cyan-50 text-cyan-700";
+      const componentBadges = Object.entries(service.components || {})
+        .filter(([key]) => key !== "active")
+        .map(([key, active]) => '<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-semibold ' +
+          (active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500") + '"><span class="w-1.5 h-1.5 rounded-full ' +
+          (active ? "bg-emerald-500" : "bg-slate-300") + '"></span>' + t(componentNames[key] || key) + '</span>')
+        .join("");
+
+      const actionButton = (action, enabled, style) => '<button type="button" onclick="App.runServiceAction(\'' + service.id + '\', \'' + action + '\')" ' +
+        (enabled ? "" : "disabled") + ' class="' + style + ' disabled:opacity-45 disabled:cursor-not-allowed w-full text-xs py-2 px-2.5 justify-center">' +
+        '<i class="fa-solid ' + actionIcons[action] + '"></i><span>' + t("services_action_" + action) + '</span></button>';
+
+      const failedNotice = task && task.status === "failed"
+        ? '<p class="text-[11px] text-rose-600 mt-3">' + t("services_action_failed", { code: Number(task.return_code || 1) }) + '</p>' +
+          (task.log_file ? '<p class="text-[10px] text-slate-500 mt-1 break-all">' + t("services_action_log_file", { path: UI.escape(task.log_file) }) + '</p>' : "")
+        : "";
+      return '<article class="rounded-2xl border ' + view.accent + ' bg-white shadow-sm hover:shadow-md transition overflow-hidden">' +
+        '<div class="p-4 sm:p-5">' +
+          '<div class="flex items-start gap-3">' +
+            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg ' + view.iconClass + '"><i class="fa-solid ' + view.icon + '"></i></div>' +
+            '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2">' +
+              '<h2 class="font-bold text-slate-800">' + t(view.name) + '</h2>' +
+              '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + statusClass + '">' +
+                (busy ? '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>' : '') + statusText + '</span>' +
+            '</div><p class="text-xs leading-5 text-slate-500 mt-1.5">' + t(view.description) + '</p></div>' +
+          '</div>' +
+          '<div class="flex flex-wrap items-center gap-2 mt-4"><span class="text-[11px] font-mono text-slate-500">' + t(view.details) + '</span>' + componentBadges + '</div>' +
+          failedNotice +
+        '</div>' +
+        '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-slate-50/80 border-t border-slate-100">' +
+          actionButton("install", service.supported && !busy && !service.complete, "btn-primary flex items-center gap-1.5") +
+          actionButton("start", service.supported && !busy && service.complete && !service.running, "btn-secondary flex items-center gap-1.5") +
+          actionButton("stop", service.supported && !busy && service.active, "btn-secondary flex items-center gap-1.5") +
+          actionButton("uninstall", service.supported && !busy && (service.installed || service.active), "btn-danger flex items-center gap-1.5") +
+        '</div>' +
+      '</article>';
+    }).join("");
+
+    body.innerHTML = cards || '<div class="col-span-full text-sm text-slate-500 p-4 rounded-xl bg-white border border-slate-200">' + t("services_store_empty") + '</div>';
+  },
+
+  async runServiceAction(serviceId, action) {
+    const service = AppState.services.find(item => item.id === serviceId);
+    if (!service) return;
+    const serviceName = t(serviceId === "mysql" ? "services_mysql_name" : "services_coder_name");
+    if (action === "uninstall" && !window.confirm(t("services_uninstall_confirm", { name: serviceName }))) return;
+
+    AppState.serviceTasks[serviceId] = { service_id: serviceId, action, status: "running" };
+    this.renderServicesPage();
+    try {
+      const task = await API.runServiceAction(serviceId, action);
+      AppState.serviceTasks[serviceId] = task;
+      this.renderServicesPage();
+      await this.waitForServiceTask(task.id);
+    } catch (error) {
+      delete AppState.serviceTasks[serviceId];
+      this.renderServicesPage();
+      UI.toast(error.message || String(error), "error");
+    }
+  },
+
+  async waitForServiceTask(taskId) {
+    while (true) {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      const task = await API.getServiceTask(taskId);
+      AppState.serviceTasks[task.service_id] = task;
+      this.renderServicesPage();
+      if (task.status === "running") continue;
+
+      await this.refreshServicesPage(false);
+      const actionName = t("services_action_" + task.action).toLowerCase();
+      if (task.status === "completed") {
+        UI.toast(t("services_action_complete", { action: actionName }), "success");
+      } else {
+        UI.toast(t("services_action_failed", { code: Number(task.return_code || 1) }), "error");
+      }
+      return;
+    }
+  },
+
   async openPortsPage() {
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
+    const servicesPage = document.getElementById("servicesStorePage");
     if (mainContent) mainContent.classList.add("hidden");
+    if (servicesPage) {
+      servicesPage.classList.add("hidden");
+      servicesPage.style.display = "none";
+    }
     if (portsPage) {
       portsPage.classList.remove("hidden");
       portsPage.style.display = "flex";

@@ -10,6 +10,7 @@ from app.config import settings
 from app.routes.auth_routes import router as auth_router
 from app.routes.file_routes import router as file_router
 from app.routes.system_routes import router as system_router
+from app.routes.service_routes import router as service_router
 from app.routes.view_routes import router as view_router
 from app.services.port_service import port_manager
 
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(file_router)
     app.include_router(system_router)
+    app.include_router(service_router)
     return app
 
 

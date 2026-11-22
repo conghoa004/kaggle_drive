@@ -183,6 +183,18 @@ const API = {
     return this.request("/api/system/ports");
   },
 
+  getServices() {
+    return this.request("/api/services");
+  },
+
+  runServiceAction(serviceId, action) {
+    return this.request("/api/services/" + encodeURIComponent(serviceId) + "/" + encodeURIComponent(action), { method: "POST" });
+  },
+
+  getServiceTask(taskId) {
+    return this.request("/api/services/tasks/" + encodeURIComponent(taskId));
+  },
+
   startPortTunnel(port) {
     return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "POST" });
   },

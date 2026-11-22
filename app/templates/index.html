@@ -256,8 +256,8 @@
           <i class="fa-solid fa-folder-open icon-folder"></i>
           <span data-i18n="nav_storage">Bộ nhớ</span>
         </div>
-        <div id="navServices" class="nav-link" onclick="App.openServicesFolder()">
-          <i class="fa-solid fa-screwdriver-wrench text-cyan-500"></i>
+        <div id="navServices" class="nav-link" onclick="App.openServicesPage()">
+          <i class="fa-solid fa-store text-cyan-500"></i>
           <span data-i18n="nav_services">Dịch vụ</span>
         </div>
         <div id="navPorts" class="nav-link" onclick="App.openPortsPage()">
@@ -368,6 +368,24 @@
 
         <!-- File View Container (Grid or List) -->
         <div id="fileViewContainer" class="flex-1"></div>
+      </main>
+      <main id="servicesStorePage" class="hidden flex-1 flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3 pb-3 border-b border-slate-200/60">
+          <h1 class="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-store text-cyan-600"></i>
+            <span data-i18n="services_store_title">Service Store</span>
+          </h1>
+          <button id="btnRefreshServices" class="btn-secondary text-xs py-2 px-3" onclick="App.refreshServicesPage(true)">
+            <i class="fa-solid fa-rotate"></i> <span data-i18n="services_store_refresh">Refresh</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-500 mb-5" data-i18n="services_store_description">Install and manage services in Kaggle Drive.</p>
+        <div id="servicesStoreBody" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div class="col-span-full flex items-center gap-2 text-sm text-slate-500 py-6">
+            <i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i>
+            <span data-i18n="services_store_loading">Checking services...</span>
+          </div>
+        </div>
       </main>
       <main id="portManagerPage" class="hidden flex-1 flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200/60">

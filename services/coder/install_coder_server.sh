@@ -22,6 +22,7 @@ LOG_FILE="$TMP_DIR/code-server.log"
 HEALTH_URL="http://127.0.0.1:${PORT}/healthz"
 
 FOREGROUND=false
+INSTALL_ONLY=false
 SERVER_PID=""
 STARTED_BY_THIS_RUN=false
 STOP_REQUESTED=false
@@ -333,6 +334,14 @@ main() {
 
     mkdir -p "$STATE_DIR" "$WORKSPACE"
 
+    if [[ "$INSTALL_ONLY" == true ]]; then
+        install_code_server
+        generate_config
+        print_connection_details
+        log "code-server installed. Start it from the Services store when ready."
+        return
+    fi
+
     if recorded_process_is_running; then
         log "code-server is already running."
         SERVER_PID="$(read_pid)"
@@ -367,8 +376,11 @@ for arg in "$@"; do
         --foreground)
             FOREGROUND=true
             ;;
+        --install-only)
+            INSTALL_ONLY=true
+            ;;
         -h|--help)
-            echo "Usage: bash install_coder_server.sh [--foreground]"
+            echo "Usage: bash install_coder_server.sh [--foreground] [--install-only]"
             exit 0
             ;;
         *)
