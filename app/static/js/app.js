@@ -158,6 +158,9 @@ const App = {
     document.querySelectorAll("#sidebar .nav-link").forEach(link => {
       link.classList.toggle("active", link.id === navId);
     });
+    try {
+      localStorage.setItem("kaggle_drive_active_navigation", navId);
+    } catch (_) {}
   },
 
   clearServicesState() {
@@ -257,7 +260,14 @@ const App = {
       if (userEl) userEl.textContent = userData.username;
     }
 
-    this.loadDirectory(AppState.currentPath);
+    const savedNavigation = localStorage.getItem("kaggle_drive_active_navigation");
+    if (savedNavigation === "navServices") {
+      this.openServicesPage();
+    } else if (savedNavigation === "navPorts") {
+      this.openPortsPage();
+    } else {
+      this.loadDirectory(AppState.currentPath);
+    }
     this.refreshSystemStats();
   },
 
