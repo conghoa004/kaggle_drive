@@ -226,7 +226,7 @@ fi
 echo "MySQL is running."
 
 # Generate database administrator credentials
-DB_USER="root"
+DB_USER="admin"
 DB_PASSWORD=$(openssl rand -hex 20)
 
 # Create or update MySQL administrator account
