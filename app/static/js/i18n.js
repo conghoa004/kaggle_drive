@@ -239,6 +239,7 @@ const I18n = {
       terminal_status_connecting: "Đang kết nối",
       terminal_status_disconnected: "Đã ngắt kết nối",
       terminal_status_error: "Có lỗi",
+      terminal_reconnect_warning: "Terminal chưa kết nối lại được sau 5 lần thử; vẫn đang tự động thử lại.",
       terminal_copy_toast: "Đã sao chép toàn bộ kết quả terminal!",
       terminal_copy_failed: "Không thể sao chép",
 
@@ -579,6 +580,7 @@ const I18n = {
       terminal_status_connecting: "Connecting",
       terminal_status_disconnected: "Disconnected",
       terminal_status_error: "Error",
+      terminal_reconnect_warning: "Terminal could not reconnect after 5 attempts; it will keep retrying automatically.",
       terminal_copy_toast: "Terminal output copied to clipboard!",
       terminal_copy_failed: "Failed to copy",
 
@@ -919,6 +921,7 @@ const I18n = {
       terminal_status_connecting: "连接中",
       terminal_status_disconnected: "已断开",
       terminal_status_error: "错误",
+      terminal_reconnect_warning: "终端尝试重新连接 5 次仍未成功，正在继续自动重试。",
       terminal_copy_toast: "已复制终端输出到剪贴板！",
       terminal_copy_failed: "无法复制",
 

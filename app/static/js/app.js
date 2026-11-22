@@ -2023,10 +2023,11 @@ const App = {
       pendingInput: [],
       heartbeatTimer: null,
       serverSentTerminalError: false,
+      serverTerminalErrorMessage: "",
       reconnectTimer: null,
       stableTimer: null,
       reconnectAttempts: 0,
-      reconnectNoticeShown: false,
+      reconnectFailureLogged: false,
       container: null
     };
     this.terminalTabs.push(tab);
@@ -2153,6 +2154,7 @@ const App = {
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     tab.serverSentTerminalError = false;
+    tab.serverTerminalErrorMessage = "";
     tab.socket = socket;
     if (this.activeTerminalTabId === tab.id) this.terminalSocket = socket;
     tab.status = "connecting";
@@ -2163,13 +2165,12 @@ const App = {
       tab.status = "connected";
       if (tab.stableTimer !== null) window.clearTimeout(tab.stableTimer);
       tab.stableTimer = window.setTimeout(() => {
-        if (tab.socket === socket) tab.reconnectAttempts = 0;
+        if (tab.socket === socket) {
+          tab.reconnectAttempts = 0;
+          tab.reconnectFailureLogged = false;
+        }
         tab.stableTimer = null;
       }, 10000);
-      if (tab.reconnectNoticeShown) {
-        tab.instance.writeln("\r\n\x1b[32mReconnected with a new shell session.\x1b[0m");
-        tab.reconnectNoticeShown = false;
-      }
       this.renderTerminalTabs();
       this.fitTerminal(tab);
       if (this.activeTerminalTabId === tab.id) tab.instance.focus();
@@ -2190,10 +2191,8 @@ const App = {
           if (message.type === "pong") return;
           if (message.type === "error") {
             tab.serverSentTerminalError = true;
+            tab.serverTerminalErrorMessage = message.message || "Terminal error";
             tab.status = tab.reconnectAttempts > 0 ? "reconnecting" : "error";
-            if (tab.reconnectAttempts === 0) {
-              tab.instance.writeln("\r\n\x1b[31m" + (message.message || "Terminal error") + "\x1b[0m");
-            }
             this.renderTerminalTabs();
             return;
           }
@@ -2226,8 +2225,14 @@ const App = {
 
       const shouldRetry = event.code !== 1008 &&
         (!tab.serverSentTerminalError || event.code === 1013);
-      if (!tab.serverSentTerminalError && !shouldRetry) {
-        tab.instance.writeln("\r\n\x1b[31mTerminal session rejected. Please sign in again.\x1b[0m");
+      if (!shouldRetry) {
+        const errorMessage = tab.serverSentTerminalError
+          ? (tab.serverTerminalErrorMessage || "Terminal error")
+          : "Terminal session rejected. Please sign in again.";
+        tab.instance.writeln("\r\n\x1b[31m" + errorMessage + "\x1b[0m");
+      } else if (tab.reconnectAttempts >= 5 && !tab.reconnectFailureLogged) {
+        tab.instance.writeln("\r\n\x1b[33m" + t("terminal_reconnect_warning") + "\x1b[0m");
+        tab.reconnectFailureLogged = true;
       }
       if (shouldRetry) this.scheduleTerminalReconnect(tab);
     };
@@ -2242,14 +2247,6 @@ const App = {
     tab.reconnectAttempts += 1;
     tab.status = "reconnecting";
     this.renderTerminalTabs();
-    if (!tab.reconnectNoticeShown) {
-      tab.instance.writeln(
-        "\r\n\x1b[33mConnection lost. Reconnecting in " + Math.ceil(delay / 1000) +
-        "s; the previous shell session will not resume.\x1b[0m"
-      );
-      tab.reconnectNoticeShown = true;
-    }
-
     tab.reconnectTimer = window.setTimeout(() => {
       tab.reconnectTimer = null;
       if (this.terminalTabs.includes(tab) && !tab.socket) this.connectTerminal(tab);
