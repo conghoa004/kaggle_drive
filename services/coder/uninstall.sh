@@ -1,66 +1,133 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
+
+# ==========================================
+# Configuration
+# ==========================================
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TMP_DIR="$SCRIPT_DIR/tmp"
 
 LOCAL_BIN="$HOME/.local/bin"
-INFO_FILE="$TMP_DIR/info/server.info"
-CONFIG_FILE="$TMP_DIR/config/config.yaml"
-PID_FILE="$TMP_DIR/run/code-server.pid"
-LOG_FILE="$TMP_DIR/logs/uninstall.log"
 
-mkdir -p "$TMP_DIR/logs"
-touch "$LOG_FILE"
+CONFIG_FILE="$TMP_DIR/config.yaml"
+PID_FILE="$TMP_DIR/code-server.pid"
+INFO_FILE="$TMP_DIR/info.txt"
 
-exec > >(tee -a "$LOG_FILE") 2>&1
+UNINSTALL_LOG="$TMP_DIR/uninstall.log"
+
+# ==========================================
+# Initialization
+# ==========================================
+
+mkdir -p "$TMP_DIR"
+
+touch "$UNINSTALL_LOG"
+chmod 600 "$UNINSTALL_LOG"
+
+exec > >(tee -a "$UNINSTALL_LOG") 2>&1
+
+# ==========================================
+# Logging
+# ==========================================
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
+die() {
+    log "ERROR: $*"
+    exit 1
+}
+
+# ==========================================
+# Stop service
+# ==========================================
+
 log "Starting code-server uninstall..."
 
-# Stop the service first.
 if [[ -f "$PID_FILE" ]]; then
-    bash "$SCRIPT_DIR/stop.sh"
+
+    log "Stopping code-server..."
+
+    bash "$SCRIPT_DIR/stop.sh" || \
+        die "Could not safely stop code-server."
+
 fi
 
-# Remove executable and its dedicated standalone package.
-if [[ -L "$LOCAL_BIN/code-server" ]]; then
-    TARGET="$(readlink -f "$LOCAL_BIN/code-server" || true)"
+# ==========================================
+# Remove standalone installation
+# ==========================================
 
-    rm -f "$LOCAL_BIN/code-server"
+CODE_SERVER_LINK="$LOCAL_BIN/code-server"
 
-    if [[ "$TARGET" == "$HOME/.local/lib/code-server/"* ]]; then
+if [[ -L "$CODE_SERVER_LINK" ]]; then
+
+    TARGET="$(readlink -f "$CODE_SERVER_LINK" || true)"
+
+    rm -f "$CODE_SERVER_LINK"
+
+    if [[ "$TARGET" == "$HOME"/.local/lib/code-server-*/bin/code-server ]]; then
+
         PACKAGE_DIR="$(dirname "$(dirname "$TARGET")")"
 
-        case "$PACKAGE_DIR" in
-            "$HOME"/.local/lib/code-server/*)
-                rm -rf -- "$PACKAGE_DIR"
-                ;;
-        esac
+        log "Removing standalone package: $PACKAGE_DIR"
+
+        rm -rf -- "$PACKAGE_DIR"
+
     fi
 
-    log "Removed code-server executable."
-elif [[ -f "$LOCAL_BIN/code-server" ]]; then
-    rm -f "$LOCAL_BIN/code-server"
-    log "Removed local executable."
+    log "Executable link removed."
+
+elif [[ -f "$CODE_SERVER_LINK" ]]; then
+
+    log "Removing local executable."
+    rm -f "$CODE_SERVER_LINK"
+
+else
+
+    log "No local standalone executable found."
+
 fi
 
-# Remove configuration and runtime state.
+# ==========================================
+# Remove configuration and runtime files
+# ==========================================
+
 rm -f "$CONFIG_FILE"
 rm -f "$PID_FILE"
 
-# Preserve logs and info for auditing.
+log "Configuration removed."
+log "PID file removed."
+
+# ==========================================
+# Update information
+# ==========================================
+
 if [[ -f "$INFO_FILE" ]]; then
+
     sed -i \
         -e 's/^STATUS=.*/STATUS=uninstalled/' \
         -e 's/^PASSWORD=.*/PASSWORD=/' \
         -e 's/^PID=.*/PID=/' \
         "$INFO_FILE"
+
 fi
 
-log "code-server has been uninstalled."
-log "Logs and service information have been preserved."
+# ==========================================
+# Complete
+# ==========================================
+
+log "=========================================="
+log "code-server uninstall completed."
+log "=========================================="
+
+log "Executable : Removed (if locally installed)"
+log "Config     : Removed"
+log "Password   : Cleared"
+log "PID        : Removed"
+log "Logs       : Preserved"
+log "Info       : Preserved"
+
 log "Data directory: $TMP_DIR"
