@@ -13,6 +13,7 @@ APACHE_PORT="8081"
 
 # Create required directories before initializing logging
 mkdir -p "$TMP_DIR"
+chmod 700 "$TMP_DIR"
 
 # Restrict file permissions
 umask 077
@@ -324,7 +325,8 @@ echo ""
 echo "ADMINISTRATOR ACCOUNT"
 echo "-----------------------------------------"
 echo "Username: ${DB_USER}"
-echo "Password: Saved in ${CREDENTIAL_FILE}"
+echo "Password: ${DB_PASSWORD}"
+echo "Credentials file: ${CREDENTIAL_FILE}"
 
 echo ""
 echo "LOG FILE"

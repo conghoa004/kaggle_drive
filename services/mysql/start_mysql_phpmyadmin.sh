@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 APACHE_PORT=8081
 MYSQL_SAFE_LOG=/var/log/mysql_safe.log
+CREDENTIAL_FILE="$SCRIPT_DIR/tmp/phpmyadmin_credentials.txt"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -13,7 +15,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-for cmd in mysqladmin service apache2ctl pgrep; do
+for cmd in mysql mysqladmin service apache2ctl pgrep; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "ERROR: Required command not found: $cmd"
         echo "Run install_mysql_phpmyadmin.sh first."
@@ -87,6 +89,29 @@ if [[ "$APACHE_READY" != true ]]; then
 fi
 
 echo
+echo "========================================="
+echo "MYSQL AND PHPMYADMIN ARE READY"
+echo "========================================="
 echo "MySQL: Running"
 echo "Apache: Running"
+echo "MySQL host: localhost"
+echo "MySQL port: 3306"
 echo "phpMyAdmin: http://localhost:$APACHE_PORT/phpmyadmin"
+
+if [[ -f "$CREDENTIAL_FILE" ]]; then
+    echo
+    echo "ADMINISTRATOR ACCOUNT"
+    echo "-----------------------------------------"
+    sed -n '/^Username:/p; /^Password:/p; /^Host:/p; /^Port:/p' "$CREDENTIAL_FILE"
+    echo "Credentials file: $CREDENTIAL_FILE"
+else
+    echo
+    echo "Administrator credentials file not found: $CREDENTIAL_FILE"
+    echo "Run install_mysql_phpmyadmin.sh to create the admin account."
+fi
+
+echo
+echo "MYSQL VERSION"
+echo "-----------------------------------------"
+mysql --version
+echo "MySQL startup log: $MYSQL_SAFE_LOG"
