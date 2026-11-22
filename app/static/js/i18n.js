@@ -113,7 +113,7 @@ const I18n = {
       services_component_code_server: "Code Server",
       nav_terminal: "Kaggle Terminal",
       nav_resources: "Tài nguyên CPU/GPU/RAM",
-      nav_ports: "Ports Manager",
+      nav_ports: "Quản lý cổng",
       port_scan_loading: "Đang quét port...",
       port_scan_success: "Đã cập nhật danh sách port.",
       port_scan_retry: "Thử lại",
@@ -297,7 +297,7 @@ const I18n = {
       // System Stats Modal
       stats_title: "Giám sát tài nguyên máy chủ",
 
-      port_manager_title: "Ports Manager",
+      port_manager_title: "Quản lý cổng",
       port_manager_refresh: "Qu\u00e9t l\u1ea1i",
       port_manager_note: "Ch\u1ec9 d\u00f9ng Quick Tunnel v\u1edbi \u1ee9ng d\u1ee5ng web/HTTP. Ch\u1ec9 li\u1ec7t k\u00ea TCP port \u0111ang l\u1eafng nghe tr\u00ean m\u00e1y n\u00e0y. URL HTTPS t\u1ea1o ra c\u00f4ng khai; h\u00e3y b\u1ea3o \u0111\u1ea3m \u1ee9ng d\u1ee5ng \u0111\u00edch c\u00f3 x\u00e1c th\u1ef1c.",
       port_manager_empty: "Kh\u00f4ng t\u00ecm th\u1ea5y TCP port c\u1ee5c b\u1ed9 n\u00e0o \u0111ang l\u1eafng nghe.",
@@ -505,7 +505,7 @@ const I18n = {
       services_component_code_server: "Code Server",
       nav_terminal: "Kaggle Terminal",
       nav_resources: "CPU/GPU/RAM Resources",
-      nav_ports: "Ports Manager",
+      nav_ports: "Port Manager",
       port_scan_loading: "Scanning listening ports...",
       port_scan_success: "Port list updated.",
       port_scan_retry: "Retry",
@@ -689,7 +689,7 @@ const I18n = {
       // System Stats Modal
       stats_title: "Server Resource Monitor",
 
-      port_manager_title: "Ports Manager",
+      port_manager_title: "Port Manager",
       port_manager_refresh: "Rescan",
       port_manager_note: "Use Quick Tunnels only for web/HTTP apps. Only TCP ports listening on this machine are listed. The HTTPS URL is public; make sure the target app has authentication.",
       port_manager_empty: "No local TCP listening ports were found.",
@@ -897,7 +897,7 @@ const I18n = {
       services_component_code_server: "Code Server",
       nav_terminal: "Kaggle 终端",
       nav_resources: "CPU/GPU/RAM 资源监控",
-      nav_ports: "Ports Manager",
+      nav_ports: "端口管理",
       port_scan_loading: "正在扫描监听端口...",
       port_scan_success: "端口列表已更新。",
       port_scan_retry: "重试",
@@ -1081,7 +1081,7 @@ const I18n = {
       // System Stats Modal
       stats_title: "服务器硬件资源监控",
 
-      port_manager_title: "Ports Manager",
+      port_manager_title: "端口管理",
       port_manager_refresh: "\u91cd\u65b0\u626b\u63cf",
       port_manager_note: "\u4ec5\u7528 Quick Tunnel \u8bbf\u95ee Web/HTTP \u5e94\u7528\u3002\u8fd9\u91cc\u53ea\u663e\u793a\u672c\u673a\u6b63\u5728\u76d1\u542c\u7684 TCP \u7aef\u53e3\u3002HTTPS \u5730\u5740\u4f1a\u516c\u5f00\u53ef\u8bbf\u95ee\uff1b\u8bf7\u786e\u4fdd\u76ee\u6807\u5e94\u7528\u5df2\u542f\u7528\u8eab\u4efd\u9a8c\u8bc1\u3002",
       port_manager_empty: "\u672a\u53d1\u73b0\u6b63\u5728\u76d1\u542c\u7684\u672c\u5730 TCP \u7aef\u53e3\u3002",
