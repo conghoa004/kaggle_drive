@@ -1688,8 +1688,8 @@ const App = {
         name: "services_coder_name",
         description: "services_coder_description",
         details: "services_coder_details",
-        icon: "fa-code",
-        iconClass: "bg-indigo-50 text-indigo-600",
+        iconHtml: '<svg viewBox="0 0 24 24" class="w-7 h-7" aria-hidden="true"><path fill="#0065A9" d="M18.2 2.4 9 10.5 4.1 6.8 1 8.1v7.8l3.1 1.3L9 13.5l9.2 8.1L23 19V5z"/><path fill="#007ACC" d="M18.2 2.4V21.6L23 19V5z"/><path fill="#1F9CF0" d="m4.1 6.8-3.1 1.3v7.8l3.1 1.3L9 13.5l9.2 8.1V2.4L9 10.5z"/></svg>',
+        iconClass: "bg-blue-50",
         accent: "border-indigo-100"
       }
     };
@@ -1754,7 +1754,8 @@ const App = {
       return '<article class="rounded-2xl border ' + view.accent + ' bg-white shadow-sm hover:shadow-md transition overflow-hidden">' +
         '<div class="p-4 sm:p-5">' +
           '<div class="flex items-start gap-3">' +
-            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg ' + view.iconClass + '"><i class="fa-solid ' + view.icon + '"></i></div>' +
+            '<div class="w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center text-lg ' + view.iconClass + '">' +
+              (view.iconHtml || '<i class="fa-solid ' + view.icon + '"></i>') + '</div>' +
             '<div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2">' +
               '<h2 class="font-bold text-slate-800">' + t(view.name) + '</h2>' +
               '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + statusClass + '">' +
