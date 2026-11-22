@@ -2138,7 +2138,7 @@ const App = {
     AppState.terminalCwd = tab.cwd;
 
     const header = document.getElementById("terminalHeaderTitle");
-    if (header) header.textContent = tab.title + " — bash - " + this.terminalPath(tab.cwd);
+    if (header) header.textContent = tab.title + " — bash";
     this.renderTerminalTabs();
 
     requestAnimationFrame(() => {

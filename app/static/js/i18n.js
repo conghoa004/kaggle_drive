@@ -223,7 +223,7 @@ const I18n = {
       preview_volume: "Âm lượng",
 
       // Terminal Modal
-      terminal_title: "bash - /kaggle/working",
+      terminal_title: "bash",
       terminal_close: "Đóng",
       terminal_minimize: "\u0054hu nh\u1ecf v\u1ec1 Kaggle Terminal",
       terminal_minimized_status: "Terminal \u0111ang thu nh\u1ecf \u2014 b\u1ea5m \u0111\u1ec3 m\u1edf l\u1ea1i",
@@ -566,7 +566,7 @@ const I18n = {
       preview_volume: "Volume",
 
       // Terminal Modal
-      terminal_title: "bash - /kaggle/working",
+      terminal_title: "bash",
       terminal_close: "Close",
       terminal_minimize: "Minimize to Kaggle Terminal",
       terminal_minimized_status: "Terminal minimized - click to restore",
@@ -909,7 +909,7 @@ const I18n = {
       preview_volume: "音量",
 
       // Terminal Modal
-      terminal_title: "bash - /kaggle/working",
+      terminal_title: "bash",
       terminal_close: "关闭",
       terminal_minimize: "\u6700\u5c0f\u5316\u5230 Kaggle Terminal",
       terminal_minimized_status: "\u7ec8\u7aef\u5df2\u6700\u5c0f\u5316\uff0c\u70b9\u51fb\u4ee5\u6062\u590d",
