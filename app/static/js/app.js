@@ -152,6 +152,26 @@ const App = {
     });
   },
 
+  openServicesFolder() {
+    const normalizePath = value => String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    const rootPath = normalizePath(AppState.rootDir || "/");
+    const targetPath = "kaggle/working/kaggle_drive/services";
+    let relativePath;
+
+    if (!rootPath) {
+      relativePath = targetPath;
+    } else if (rootPath === targetPath) {
+      relativePath = "";
+    } else if (targetPath.startsWith(rootPath + "/")) {
+      relativePath = targetPath.slice(rootPath.length + 1);
+    } else {
+      UI.toast(t("services_folder_outside_root"), "error");
+      return;
+    }
+
+    this.loadDirectory(relativePath);
+  },
+
   async checkAuthStatus() {
     const authMeta = document.querySelector('meta[name="server-auth"]');
     const userMeta = document.querySelector('meta[name="server-user"]');
@@ -279,8 +299,13 @@ const App = {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
-    const normalizedPath = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
-    const isServicesPath = normalizedPath === "services" || normalizedPath.startsWith("services/");
+    const normalizePath = value => String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    const normalizedPath = normalizePath(path);
+    const normalizedRoot = normalizePath(AppState.rootDir || "/");
+    const fullPath = [normalizedRoot, normalizedPath].filter(Boolean).join("/");
+    const servicesPath = "kaggle/working/kaggle_drive/services";
+    const isServicesPath = normalizedPath === "services" || normalizedPath.startsWith("services/") ||
+      fullPath === servicesPath || fullPath.startsWith(servicesPath + "/");
     this.setActiveNavigation(isServicesPath ? "navServices" : "navStorage");
     AppState.currentPath = path;
     try {
