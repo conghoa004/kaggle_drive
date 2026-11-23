@@ -545,6 +545,8 @@ class FileService:
     def rename_item(rel_path: str, new_name: str) -> Dict[str, Any]:
         """Rename a file or folder safely within its parent directory."""
         target = get_safe_path_entry(rel_path, must_exist=True)
+        if not target.is_symlink() and target.resolve() == get_root_dir().resolve():
+            raise HTTPException(status_code=403, detail="Cannot rename the configured root directory.")
 
         # Sanitize new_name to avoid path injection
         clean_new_name = os.path.basename(new_name.strip())

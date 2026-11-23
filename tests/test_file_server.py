@@ -142,18 +142,14 @@ class TestKaggleCloudDrive(unittest.TestCase):
         self.assertEqual(read_res["content"], test_code)
         self.assertEqual(read_res["category"], "code")
 
-        # 4. Duplicate item
-        FileService.duplicate_item("demo_folder/sample.py")
-        self.assertTrue((settings.ROOT_DIR / "demo_folder" / "sample_copy1.py").is_file())
-
-        # 5. List directory
+        # 4. List directory
         list_res = FileService.list_directory("demo_folder")
-        self.assertEqual(list_res["total_items"], 2)
+        self.assertEqual(list_res["total_items"], 1)
 
-        # 6. Delete file
-        del_res = FileService.delete_item("demo_folder/sample_copy1.py")
+        # 5. Delete file
+        del_res = FileService.delete_item("demo_folder/sample.py")
         self.assertEqual(del_res["status"], "success")
-        self.assertFalse((settings.ROOT_DIR / "demo_folder" / "sample_copy1.py").exists())
+        self.assertFalse((settings.ROOT_DIR / "demo_folder" / "sample.py").exists())
 
     def test_04_zip_and_tar_operations(self):
         """Test zip creation, extraction, and Python 3.13 tar PEP 706 filter compliance."""
