@@ -70,11 +70,6 @@ const API = {
     return this.request("/api/files/content?path=" + encodeURIComponent(path));
   },
 
-  getFileProperties(path) {
-    const params = new URLSearchParams({ path });
-    return this.request(`/api/files/properties?${params.toString()}`);
-  },
-
   saveFileContent(path, content) {
     return this.request("/api/files/content", {
       method: "POST",

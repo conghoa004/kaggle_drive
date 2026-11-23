@@ -51,9 +51,6 @@ EXTENSION_CATEGORIES = {
     "bz2": "archive", "7z": "archive", "rar": "archive"
 }
 
-MAX_PROPERTIES_SCAN_ENTRIES = 100000
-
-
 MEDIA_MIMETYPES = {
     # Images
     "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
@@ -190,76 +187,6 @@ class FileService:
             "folder_name": folder.name if clean_rel else "working",
             "items": items,
             "total_items": len(items)
-        }
-
-    @staticmethod
-    def get_properties(rel_path: str) -> Dict[str, Any]:
-        """Return file or folder metadata without following nested symlinks."""
-        clean_rel = (rel_path or "").strip().replace("\\", "/").strip("/")
-        target = get_safe_path(clean_rel, must_exist=True)
-        try:
-            info = target.stat()
-        except OSError:
-            raise HTTPException(status_code=403, detail="Cannot read properties for this item.")
-
-        is_dir = target.is_dir()
-        is_file = target.is_file()
-        size = info.st_size
-        files_count = 0
-        folders_count = 0
-        size_complete = True
-
-        if is_dir:
-            size = 0
-            pending = [target]
-            scanned_entries = 0
-            while pending:
-                directory = pending.pop()
-                try:
-                    with os.scandir(directory) as entries:
-                        for entry in entries:
-                            if scanned_entries >= MAX_PROPERTIES_SCAN_ENTRIES:
-                                size_complete = False
-                                pending.clear()
-                                break
-                            scanned_entries += 1
-                            try:
-                                if entry.is_symlink():
-                                    continue
-                                if entry.is_dir(follow_symlinks=False):
-                                    folders_count += 1
-                                    pending.append(Path(entry.path))
-                                elif entry.is_file(follow_symlinks=False):
-                                    files_count += 1
-                                    size += entry.stat(follow_symlinks=False).st_size
-                            except OSError:
-                                size_complete = False
-                except OSError:
-                    size_complete = False
-
-        name = Path(clean_rel).name if clean_rel else (target.name or "working")
-        extension = Path(name).suffix.lstrip(".").lower() if is_file else ""
-        created_at = None
-        birth_time = getattr(info, "st_birthtime", None)
-        if birth_time is not None:
-            created_at = datetime.fromtimestamp(birth_time).strftime("%Y-%m-%d %H:%M:%S")
-
-        return {
-            "name": name,
-            "path": clean_rel,
-            "parent_path": clean_rel.rpartition("/")[0],
-            "is_dir": is_dir,
-            "is_file": is_file,
-            "extension": extension,
-            "mime_type": (mimetypes.guess_type(name)[0] or "application/octet-stream") if is_file else None,
-            "size": size,
-            "formatted_size": format_size(size),
-            "files_count": files_count,
-            "folders_count": folders_count,
-            "size_complete": size_complete,
-            "created_at": created_at,
-            "modified_at": datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-            "permissions": format(stat_module.S_IMODE(info.st_mode), "04o"),
         }
 
     @staticmethod

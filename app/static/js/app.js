@@ -913,12 +913,6 @@ const App = {
             </div>
             <span class="context-item-kbd">F2</span>
           </button>
-          <button class="context-menu-item" onclick="App.hideContextMenu(); App.showProperties('${safePath}')">
-            <div class="context-item-left">
-              <span class="context-item-icon"><i class="fa-solid fa-circle-info"></i></span>
-              <span>${t("action_properties")}</span>
-            </div>
-          </button>
           <div class="context-menu-divider"></div>
           <button class="context-menu-item danger" onclick="App.hideContextMenu(); App.promptDelete('${safePath}')">
             <div class="context-item-left">
@@ -1034,12 +1028,6 @@ const App = {
               <span>${t("action_rename")}</span>
             </div>
             <span class="context-item-kbd">F2</span>
-          </button>
-          <button class="context-menu-item" onclick="App.hideContextMenu(); App.showProperties('${safePath}')">
-            <div class="context-item-left">
-              <span class="context-item-icon"><i class="fa-solid fa-circle-info"></i></span>
-              <span>${t("action_properties")}</span>
-            </div>
           </button>
           <div class="context-menu-divider"></div>
           <button class="context-menu-item danger" onclick="App.hideContextMenu(); App.promptDelete('${safePath}')">
@@ -1643,9 +1631,6 @@ const App = {
             <i class="fa-solid fa-file-zipper"></i> ${t("action_download_zip")}
           </button>
         `}
-        <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.showProperties('${safePath}')">
-          <i class="fa-solid fa-circle-info"></i> ${t("action_properties")}
-        </button>
         <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.copyFilePath('${safePath}')">
           <i class="fa-solid fa-folder-tree text-sky-500"></i> ${t("action_copy_path")}
         </button>
@@ -1663,57 +1648,6 @@ const App = {
 
     if (content) content.innerHTML = actions;
     UI.openModal("itemActionsModal");
-  },
-
-  async showProperties(path) {
-    this.hideContextMenu();
-    const modal = document.getElementById("propertiesModal");
-    const title = document.getElementById("propertiesTitle");
-    const body = document.getElementById("propertiesBody");
-    if (!modal || !body) return;
-
-    if (title) title.textContent = t("properties_title");
-    body.textContent = t("properties_loading");
-    UI.openModal("propertiesModal");
-
-    try {
-      const properties = await API.getFileProperties(path);
-      body.replaceChildren();
-      const rows = [
-        { label: t("properties_name"), value: properties.name },
-        { label: t("properties_type"), value: properties.is_dir ? t("folder_badge") : t("file_badge") },
-        { label: t("properties_location"), value: properties.parent_path || t("properties_root") },
-        ...(properties.extension ? [{ label: t("properties_extension"), value: `.${properties.extension}` }] : []),
-        ...(properties.mime_type ? [{ label: t("properties_mime"), value: properties.mime_type }] : []),
-        { label: t("properties_size"), value: properties.formatted_size },
-        { label: t("properties_created"), value: properties.created_at || "-" },
-        { label: t("properties_modified"), value: properties.modified_at || "-" },
-        { label: t("properties_permissions"), value: properties.permissions || "-" }
-      ];
-
-      rows.forEach(({ label, value }) => {
-        const row = document.createElement("div");
-        row.className = "properties-row";
-        const labelElement = document.createElement("span");
-        labelElement.className = "properties-label";
-        labelElement.textContent = label;
-        const valueElement = document.createElement("span");
-        valueElement.className = "properties-value";
-        valueElement.textContent = value ?? "-";
-        row.append(labelElement, valueElement);
-        body.appendChild(row);
-      });
-
-      if (properties.is_dir && !properties.size_complete) {
-        const note = document.createElement("p");
-        note.className = "properties-note";
-        note.textContent = t("properties_partial");
-        body.appendChild(note);
-      }
-    } catch (error) {
-      body.textContent = t("properties_load_error");
-      UI.toast(error.message, "error");
-    }
   },
 
   async copyFilePath(path) {

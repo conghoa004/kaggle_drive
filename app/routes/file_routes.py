@@ -108,13 +108,6 @@ def list_files(
     return FileService.list_directory(path, show_hidden=show_hidden)
 
 
-@router.get("/properties")
-def get_file_properties(request: Request, path: str = Query(..., description="File or folder path")):
-    """Get metadata and content size for a file or folder."""
-    require_auth(request)
-    return FileService.get_properties(path)
-
-
 @router.get("/download")
 def download_file(request: Request, path: str = Query(..., description="File path to download")):
     """Download a single file."""
