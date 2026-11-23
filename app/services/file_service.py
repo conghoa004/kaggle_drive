@@ -6,6 +6,7 @@ import base64
 import shutil
 import socket
 import stat as stat_module
+import threading
 import tempfile
 import tarfile
 import zipfile
@@ -69,6 +70,94 @@ MEDIA_MIMETYPES = {
     "xls": "application/vnd.ms-excel"
 }
 
+_SYSTEM_PSEUDO_FILESYSTEM_ROOTS = (
+    tuple(Path(path) for path in ("/proc", "/sys", "/dev", "/run"))
+    if os.name != "nt"
+    else ()
+)
+UPLOAD_CHUNK_TTL_SECONDS = 24 * 60 * 60
+UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS = 60 * 60
+_UPLOAD_CHUNK_DIRECTORIES: Dict[Path, float] = {}
+_UPLOAD_CHUNK_DIRECTORIES_LOCK = threading.Lock()
+
+
+def _is_system_pseudo_path(path: Path) -> bool:
+    return any(path == root or root in path.parents for root in _SYSTEM_PSEUDO_FILESYSTEM_ROOTS)
+
+
+def _is_regular_archive_file(path: Path) -> bool:
+    if path.is_symlink() or _is_system_pseudo_path(path):
+        return False
+    try:
+        return (
+            stat_module.S_ISREG(path.stat(follow_symlinks=False).st_mode)
+            and os.access(path, os.R_OK)
+        )
+    except OSError:
+        return False
+
+
+def _iter_archive_files(root: Path):
+    """Yield visible regular files while pruning symlinks and virtual system trees."""
+    if _is_system_pseudo_path(root):
+        return
+
+    def ignore_walk_error(_error):
+        return None
+
+    for directory, subdirectories, filenames in os.walk(
+        root, topdown=True, onerror=ignore_walk_error, followlinks=False
+    ):
+        directory_path = Path(directory)
+        subdirectories[:] = [
+            name
+            for name in subdirectories
+            if not name.startswith(".")
+            and not (directory_path / name).is_symlink()
+            and not _is_system_pseudo_path(directory_path / name)
+        ]
+        for filename in filenames:
+            path = directory_path / filename
+            relative = path.relative_to(root)
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            if _is_regular_archive_file(path):
+                yield path
+
+
+def _cleanup_stale_upload_chunk_files(directory: Path, now: Optional[float] = None) -> bool:
+    """Remove expired partial uploads; return whether recent partials remain."""
+    cutoff = (time.time() if now is None else now) - UPLOAD_CHUNK_TTL_SECONDS
+    has_recent_chunks = False
+    try:
+        candidates = directory.glob(".upload-*.part")
+        for candidate in candidates:
+            try:
+                if candidate.is_symlink():
+                    continue
+                metadata = candidate.stat(follow_symlinks=False)
+                if not stat_module.S_ISREG(metadata.st_mode):
+                    continue
+                if metadata.st_mtime <= cutoff:
+                    candidate.unlink()
+                else:
+                    has_recent_chunks = True
+            except OSError:
+                has_recent_chunks = True
+    except OSError:
+        return False
+    return has_recent_chunks
+
+
+def _register_upload_chunk_directory(directory: Path) -> None:
+    directory = directory.resolve()
+    now = time.monotonic()
+    with _UPLOAD_CHUNK_DIRECTORIES_LOCK:
+        last_registered = _UPLOAD_CHUNK_DIRECTORIES.get(directory)
+        _UPLOAD_CHUNK_DIRECTORIES[directory] = now
+    if last_registered is None or now - last_registered >= 60:
+        _cleanup_stale_upload_chunk_files(directory)
+
 
 def format_size(bytes_num: int) -> str:
     """Format file size into human-readable string."""
@@ -125,6 +214,23 @@ def _resolve_upload_destination(base_folder: Path, relative_filename: str) -> Pa
 class FileService:
 
     @staticmethod
+    def cleanup_stale_upload_chunks() -> None:
+        """Periodically clean expired chunks in directories used for uploads."""
+        with _UPLOAD_CHUNK_DIRECTORIES_LOCK:
+            directories = list(_UPLOAD_CHUNK_DIRECTORIES.items())
+        now = time.time()
+        for directory, last_registered in directories:
+            if _cleanup_stale_upload_chunk_files(directory, now):
+                continue
+            with _UPLOAD_CHUNK_DIRECTORIES_LOCK:
+                if _UPLOAD_CHUNK_DIRECTORIES.get(directory) == last_registered:
+                    _UPLOAD_CHUNK_DIRECTORIES.pop(directory, None)
+
+    @staticmethod
+    def register_upload_chunk_directory(directory: Path) -> None:
+        _register_upload_chunk_directory(directory)
+
+    @staticmethod
     def list_directory(rel_path: str = "", show_hidden: bool = False) -> Dict[str, Any]:
         """List files and folders in the target directory."""
         folder = get_safe_path(rel_path, must_exist=True)
@@ -134,6 +240,7 @@ class FileService:
                 detail="Đường dẫn chỉ định không phải là một thư mục."
             )
 
+        _cleanup_stale_upload_chunk_files(folder)
         items = []
         try:
             for item in folder.iterdir():
@@ -606,15 +713,21 @@ class FileService:
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                 if target.is_file():
+                    if not _is_regular_archive_file(target):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="System and special files cannot be archived.",
+                        )
                     add_file(zip_file, target, target.name)
-                else:
-                    for path in target.rglob("*"):
-                        if path.is_symlink() or not path.is_file():
-                            continue
+                elif target.is_dir():
+                    for path in _iter_archive_files(target):
                         relative = path.relative_to(target)
-                        if any(part.startswith(".") for part in relative.parts):
-                            continue
                         add_file(zip_file, path, relative.as_posix())
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Only regular files and directories can be archived.",
+                    )
             if not entries:
                 raise HTTPException(status_code=400, detail="No visible files were available to archive.")
             archive.seek(0)
@@ -1274,16 +1387,22 @@ class FileService:
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                 for target in targets:
+                    if _is_system_pseudo_path(target):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="System virtual filesystems cannot be archived.",
+                        )
                     if target.is_file():
+                        if not _is_regular_archive_file(target):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Only regular files can be archived.",
+                            )
                         add_file(zip_file, target, target.name)
                     elif target.is_dir():
                         folder_entries = 0
-                        for path in target.rglob("*"):
-                            if path.is_symlink() or not path.is_file():
-                                continue
+                        for path in _iter_archive_files(target):
                             relative = path.relative_to(target)
-                            if any(part.startswith(".") for part in relative.parts):
-                                continue
                             archive_name = (Path(target.name) / relative).as_posix()
                             add_file(zip_file, path, archive_name)
                             folder_entries += 1
@@ -1374,20 +1493,26 @@ class FileService:
                 temp_path = Path(output.name)
                 with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                     for target in targets:
+                        if _is_system_pseudo_path(target):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="System virtual filesystems cannot be archived.",
+                            )
                         if target.is_symlink():
                             raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
                         if target.is_file():
+                            if not _is_regular_archive_file(target):
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail="Only regular files can be archived.",
+                                )
                             add_file(zip_file, target, target.name)
                         elif target.is_dir():
                             directory_entries = 0
-                            for path in target.rglob("*"):
-                                if path.is_symlink() or not path.is_file():
-                                    continue
+                            for path in _iter_archive_files(target):
                                 if path.resolve() in (dest.resolve(), temp_path.resolve()):
                                     continue
                                 relative = path.relative_to(target)
-                                if any(part.startswith(".") for part in relative.parts):
-                                    continue
                                 archive_path = (Path(target.name) / relative).as_posix()
                                 add_file(zip_file, path, archive_path)
                                 directory_entries += 1

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,13 +13,23 @@ from app.routes.file_routes import router as file_router
 from app.routes.system_routes import router as system_router
 from app.routes.view_routes import router as view_router
 from app.services.port_service import port_manager
+from app.services.file_service import FileService, UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS
+
+
+async def _upload_chunk_cleanup_loop():
+    while True:
+        await asyncio.sleep(UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS)
+        await asyncio.to_thread(FileService.cleanup_stale_upload_chunks)
 
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    cleanup_task = asyncio.create_task(_upload_chunk_cleanup_loop())
     try:
         yield
     finally:
+        cleanup_task.cancel()
+        await asyncio.gather(cleanup_task, return_exceptions=True)
         port_manager.stop_all()
 
 

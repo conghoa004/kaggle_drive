@@ -340,6 +340,7 @@ def upload_file_chunk(
             raise _overwrite_required([relative_dest])
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
+        FileService.register_upload_chunk_directory(dest_path.parent)
         data = chunk.file.read(settings.UPLOAD_CHUNK_BYTES + 1)
         if len(data) > settings.UPLOAD_CHUNK_BYTES or offset + len(data) > total_size:
             raise HTTPException(status_code=413, detail="Upload chunk exceeds the configured limit.")
@@ -355,6 +356,7 @@ def upload_file_chunk(
 
         with chunk_path.open(mode) as output:
             output.write(data)
+        FileService.register_upload_chunk_directory(dest_path.parent)
 
         received = offset + len(data)
         if received == total_size:
