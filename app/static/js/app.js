@@ -3045,9 +3045,11 @@ const App = {
   },
 
   runDiskCheck(tab = this.getActiveTerminalTab()) {
-    const rootDir = String(AppState.rootDir || "/");
-    const quotedRoot = "'" + rootDir.replace(/'/g, "'\\''") + "'";
-    this.runTerminalCommand("df -h -- " + quotedRoot, tab);
+    this.runTerminalCommand("df -h .", tab);
+  },
+
+  runFolderSizeCheck(tab = this.getActiveTerminalTab()) {
+    this.runTerminalCommand("du -sh .", tab);
   },
 
   initDragSelect() {
