@@ -9,7 +9,6 @@ from urllib.parse import urlsplit
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.config import settings
 from app.security import get_safe_path
 
 if os.name != "nt":

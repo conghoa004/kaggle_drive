@@ -606,36 +606,6 @@
   display: flex !important;
 }
 
-/* ================= PREVIEW MODAL ================= */
-.preview-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 200px;
-  max-height: 72vh;
-  overflow: auto;
-}
-
-.preview-image {
-  max-width: 100%;
-  max-height: 68vh;
-  object-fit: contain;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  display: block;
-  margin: 0 auto;
-}
-
-.preview-media-player {
-  max-width: 100%;
-  max-height: 68vh;
-  border-radius: 12px;
-  background: #000000;
-  display: block;
-  margin: 0 auto;
-}
-
 /* ================= RICH MEDIA LIGHTBOX & MULTI-MEDIA PLAYERS ================= */
 .preview-lightbox-overlay {
   background: rgba(3, 7, 18, 0.94) !important;
@@ -2042,14 +2012,6 @@
   background: transparent;
   color: inherit;
   padding: 0;
-}
-
-.preview-table-container {
-  width: 100%;
-  max-height: 65vh;
-  overflow: auto;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
 }
 
 /* ================= TERMINAL MODAL ================= */

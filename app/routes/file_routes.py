@@ -2,7 +2,7 @@ import mimetypes
 import os
 from urllib.parse import quote
 from typing import List, Optional
-from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, Query, status
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field

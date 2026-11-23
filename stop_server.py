@@ -5,8 +5,6 @@ Stops the running background server gracefully or forcefully.
 """
 
 import os
-import sys
-import signal
 import subprocess
 from pathlib import Path
 
