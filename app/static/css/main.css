@@ -375,13 +375,28 @@
   animation: fadeIn 0.2s ease;
 }
 
-/* Upload progress stays visible without blocking the file manager. */
-.upload-progress-widget {
+/* Long-running file operations stay visible without blocking the file manager. */
+.background-task-container {
   position: fixed;
   right: 24px;
   bottom: 24px;
   z-index: 1100;
   width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.background-task-container > * {
+  pointer-events: auto;
+}
+
+.upload-progress-widget,
+.background-task-card {
+  position: relative;
+  width: 100%;
   padding: 16px 18px 14px;
   border: 1px solid #dbe5f1;
   border-radius: 16px;
@@ -461,6 +476,16 @@
   transition: width 0.2s ease;
 }
 
+.upload-progress-fill.is-indeterminate {
+  width: 38%;
+  animation: backgroundTaskProgress 1.25s ease-in-out infinite alternate;
+}
+
+@keyframes backgroundTaskProgress {
+  from { transform: translateX(-20%); }
+  to { transform: translateX(185%); }
+}
+
 .upload-progress-text {
   margin-top: 7px;
   color: #334155;
@@ -469,18 +494,18 @@
   text-align: right;
 }
 
-body.upload-in-progress .toast-container {
-  bottom: 136px;
+body.has-background-tasks .toast-container {
+  bottom: calc(24px + var(--background-task-height, 100px) + 12px);
 }
 
 @media (max-width: 640px) {
-  .upload-progress-widget {
+  .background-task-container {
     right: 16px;
     bottom: 16px;
   }
 
-  body.upload-in-progress .toast-container {
-    bottom: 128px;
+  body.has-background-tasks .toast-container {
+    bottom: calc(16px + var(--background-task-height, 100px) + 12px);
   }
 }
 

@@ -55,6 +55,9 @@ const I18n = {
       clipboard_cut_status: "\u0110\u00e3 c\u1eaft {count} m\u1ee5c \u00b7 Ctrl+V \u0111\u1ec3 d\u00e1n",
       clipboard_pasted: "\u0110\u00e3 d\u00e1n {count} m\u1ee5c.",
       clipboard_paste_partial: "\u0110\u00e3 d\u00e1n {success} m\u1ee5c; {failed} m\u1ee5c g\u1eb7p l\u1ed7i.",
+      clipboard_copying: "\u0110ang sao ch\u00e9p t\u1ec7p v\u00e0 th\u01b0 m\u1ee5c...",
+      clipboard_moving: "\u0110ang di chuy\u1ec3n t\u1ec7p v\u00e0 th\u01b0 m\u1ee5c...",
+      clipboard_operation_progress: "\u0110ang x\u1eed l\u00fd m\u1ee5c {current}/{total}: {name}",
       clipboard_empty: "Kh\u00f4ng c\u00f3 m\u1ee5c n\u00e0o \u0111\u1ec3 d\u00e1n.",
       clipboard_same_folder: "M\u1ee5c \u0111\u00e3 n\u1eb1m trong th\u01b0 m\u1ee5c n\u00e0y.",
 
@@ -353,6 +356,8 @@ const I18n = {
       compress_start_toast: "Đang nén tệp/thư mục trên Kaggle...",
       compress_success_toast: "Đã nén thành công vào \"{name}\"!",
 
+      background_operation_running: "M\u00e1y ch\u1ee7 \u0111ang x\u1eed l\u00fd...",
+
       // Actions Toasts
       extract_start_toast: "Đang giải nén tập tin...",
       extract_success_toast: "Đã giải nén thành công!",
@@ -407,6 +412,9 @@ const I18n = {
       clipboard_cut_status: "Cut {count} item(s) \u00b7 Press Ctrl+V to paste",
       clipboard_pasted: "Pasted {count} item(s).",
       clipboard_paste_partial: "Pasted {success} item(s); {failed} failed.",
+      clipboard_copying: "Copying files and folders...",
+      clipboard_moving: "Moving files and folders...",
+      clipboard_operation_progress: "Processing item {current}/{total}: {name}",
       clipboard_empty: "There are no items to paste.",
       clipboard_same_folder: "These items are already in this folder.",
 
@@ -705,6 +713,8 @@ const I18n = {
       compress_start_toast: "Compressing items on Kaggle...",
       compress_success_toast: "Successfully compressed to \"{name}\"!",
 
+      background_operation_running: "Processing on the server...",
+
       // Actions Toasts
       extract_start_toast: "Extracting archive...",
       extract_success_toast: "Extracted successfully!",
@@ -759,6 +769,9 @@ const I18n = {
       clipboard_cut_status: "\u5df2\u526a\u5207 {count} \u4e2a\u9879\u76ee \u00b7 \u6309 Ctrl+V \u7c98\u8d34",
       clipboard_pasted: "\u5df2\u7c98\u8d34 {count} \u4e2a\u9879\u76ee\u3002",
       clipboard_paste_partial: "\u5df2\u7c98\u8d34 {success} \u4e2a\u9879\u76ee\uff1b{failed} \u4e2a\u5931\u8d25\u3002",
+      clipboard_copying: "\u6b63\u5728\u590d\u5236\u6587\u4ef6\u548c\u6587\u4ef6\u5939...",
+      clipboard_moving: "\u6b63\u5728\u79fb\u52a8\u6587\u4ef6\u548c\u6587\u4ef6\u5939...",
+      clipboard_operation_progress: "\u6b63\u5728\u5904\u7406\u9879\u76ee {current}/{total}: {name}",
       clipboard_empty: "\u6ca1\u6709\u53ef\u7c98\u8d34\u7684\u9879\u76ee\u3002",
       clipboard_same_folder: "\u9879\u76ee\u5df2\u5728\u6b64\u6587\u4ef6\u5939\u4e2d\u3002",
 
@@ -1056,6 +1069,8 @@ const I18n = {
       compress_btn: "立即压缩",
       compress_start_toast: "正在 Kaggle 上压缩文件...",
       compress_success_toast: "成功压缩到 \"{name}\"！",
+
+      background_operation_running: "\u670d\u52a1\u5668\u6b63\u5728\u5904\u7406...",
 
       // Actions Toasts
       extract_start_toast: "正在解压文件...",

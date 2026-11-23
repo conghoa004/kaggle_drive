@@ -460,8 +460,9 @@
     </div>
   </div>
 
-  <!-- Non-blocking upload progress -->
-  <section id="uploadProgressWidget" class="upload-progress-widget hidden" role="status" aria-live="polite" aria-hidden="true">
+  <!-- Non-blocking background operation progress -->
+  <div id="backgroundTaskContainer" class="background-task-container" aria-live="polite">
+  <section id="uploadProgressWidget" class="upload-progress-widget hidden" role="status" aria-hidden="true">
     <div class="upload-progress-heading">
       <h3 class="upload-progress-title">
         <i class="fa-solid fa-cloud-arrow-up text-brand-600"></i>
@@ -478,6 +479,7 @@
     </div>
     <div id="uploadProgressText" class="upload-progress-text">0%</div>
   </section>
+  </div>
 
   <!-- Code & Text Editor Modal -->
   <div id="editorModal" class="modal-overlay">

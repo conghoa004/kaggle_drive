@@ -44,7 +44,7 @@ const Uploader = {
       const label = button.querySelector("[data-i18n]");
       if (label) label.textContent = t("upload_cancel_button");
     }
-    document.body.classList.add("upload-in-progress");
+    UI.updateBackgroundTaskLayout();
   },
 
   hideProgress() {
@@ -55,7 +55,7 @@ const Uploader = {
     }
     const button = document.getElementById("uploadCancelButton");
     if (button) button.disabled = false;
-    document.body.classList.remove("upload-in-progress");
+    UI.updateBackgroundTaskLayout();
   },
 
   init() {

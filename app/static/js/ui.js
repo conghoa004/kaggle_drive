@@ -5,6 +5,8 @@
 
 const UI = {
   confirmationResolver: null,
+  backgroundTaskSequence: 0,
+  backgroundTasks: new Map(),
 
   // Toast Notification System
   toast(message, type = "info", duration = 3200) {
@@ -30,6 +32,95 @@ const UI = {
       toastEl.style.transition = "all 0.25s ease";
       setTimeout(() => toastEl.remove(), 260);
     }, duration);
+  },
+
+  startBackgroundTask(title, detail, progress = null) {
+    const container = document.getElementById("backgroundTaskContainer");
+    if (!container) return null;
+
+    const id = "background-task-" + (++this.backgroundTaskSequence);
+    const card = document.createElement("section");
+    card.className = "background-task-card";
+    card.setAttribute("role", "status");
+
+    const heading = document.createElement("div");
+    heading.className = "upload-progress-heading";
+    const titleElement = document.createElement("h3");
+    titleElement.className = "upload-progress-title";
+    const icon = document.createElement("i");
+    icon.className = "fa-solid fa-spinner fa-spin text-brand-600";
+    icon.setAttribute("aria-hidden", "true");
+    const titleText = document.createElement("span");
+    titleElement.append(icon, titleText);
+    heading.appendChild(titleElement);
+
+    const detailElement = document.createElement("div");
+    detailElement.className = "upload-progress-file";
+    const track = document.createElement("div");
+    track.className = "upload-progress-track";
+    track.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("div");
+    fill.className = "upload-progress-fill is-indeterminate";
+    track.appendChild(fill);
+    const progressText = document.createElement("div");
+    progressText.className = "upload-progress-text";
+
+    card.append(heading, detailElement, track, progressText);
+    container.appendChild(card);
+    this.backgroundTasks.set(id, {
+      card,
+      title: titleText,
+      detail: detailElement,
+      fill,
+      progressText
+    });
+    this.updateBackgroundTask(id, { title, detail, progress });
+    return id;
+  },
+
+  updateBackgroundTask(id, update = {}) {
+    const task = this.backgroundTasks.get(id);
+    if (!task) return;
+    if (Object.prototype.hasOwnProperty.call(update, "title")) {
+      task.title.textContent = String(update.title || "");
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "detail")) {
+      task.detail.textContent = String(update.detail || "");
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "progress")) {
+      if (Number.isFinite(update.progress)) {
+        const progress = Math.max(0, Math.min(100, update.progress));
+        task.fill.classList.remove("is-indeterminate");
+        task.fill.style.width = progress + "%";
+        task.progressText.textContent = Math.round(progress) + "%";
+      } else {
+        task.fill.classList.add("is-indeterminate");
+        task.fill.style.width = "";
+        task.progressText.textContent = t("background_operation_running");
+      }
+    }
+    this.updateBackgroundTaskLayout();
+  },
+
+  finishBackgroundTask(id) {
+    const task = this.backgroundTasks.get(id);
+    if (!task) return;
+    task.card.remove();
+    this.backgroundTasks.delete(id);
+    this.updateBackgroundTaskLayout();
+  },
+
+  updateBackgroundTaskLayout() {
+    const container = document.getElementById("backgroundTaskContainer");
+    if (!container) return;
+    const active = container.querySelector(
+      ".background-task-card, #uploadProgressWidget:not(.hidden)"
+    );
+    document.body.classList.toggle("has-background-tasks", Boolean(active));
+    document.body.style.setProperty(
+      "--background-task-height",
+      Math.ceil(container.getBoundingClientRect().height) + "px"
+    );
   },
 
   // Modal Control

@@ -767,10 +767,29 @@ const App = {
     }
 
     this.clipboardPasteInProgress = true;
+    const taskId = UI.startBackgroundTask(
+      t(clipboard.operation === "cut" ? "clipboard_moving" : "clipboard_copying"),
+      t("clipboard_operation_progress", {
+        current: 0,
+        total: pathsToPaste.length,
+        name: ""
+      }),
+      0
+    );
     try {
       const succeeded = [];
       const failed = [];
-      for (const sourcePath of pathsToPaste) {
+      for (let index = 0; index < pathsToPaste.length; index++) {
+        const sourcePath = pathsToPaste[index];
+        const name = sourcePath.split("/").pop() || sourcePath;
+        UI.updateBackgroundTask(taskId, {
+          detail: t("clipboard_operation_progress", {
+            current: index + 1,
+            total: pathsToPaste.length,
+            name
+          }),
+          progress: (index / pathsToPaste.length) * 100
+        });
         try {
           if (clipboard.operation === "cut") {
             await API.moveItem(sourcePath, targetPath);
@@ -781,6 +800,9 @@ const App = {
         } catch (error) {
           failed.push(error);
         }
+        UI.updateBackgroundTask(taskId, {
+          progress: ((index + 1) / pathsToPaste.length) * 100
+        });
       }
 
       if (clipboard.operation === "cut" && succeeded.length) {
@@ -806,6 +828,7 @@ const App = {
       }
     } finally {
       this.clipboardPasteInProgress = false;
+      UI.finishBackgroundTask(taskId);
     }
   },
 
@@ -1357,12 +1380,17 @@ const App = {
       UI.toast(t("no_items_selected"), "warning");
       return;
     }
-    UI.toast(t("compressing_multi_toast", { count: items.length }), "info", 3000);
+    const taskId = UI.startBackgroundTask(
+      t("compressing_multi_toast", { count: items.length }),
+      t("background_operation_running")
+    );
     try {
       await API.downloadSelectedZip(items);
       UI.toast(t("compress_multi_success"), "success");
     } catch (err) {
       UI.toast(`${t("error")}: ${err.message}`, "error");
+    } finally {
+      UI.finishBackgroundTask(taskId);
     }
   },
 
@@ -1475,7 +1503,10 @@ const App = {
 
     const archiveName = nameInput ? nameInput.value.trim() : "";
     UI.closeModal("compressModal");
-    UI.toast(t("compress_start_toast"), "info");
+    const taskId = UI.startBackgroundTask(
+      t("compress_start_toast"),
+      t("background_operation_running")
+    );
 
     try {
       const res = await API.compressItems(paths, archiveName, AppState.currentPath);
@@ -1485,6 +1516,8 @@ const App = {
       this.refreshSystemStats();
     } catch (err) {
       UI.toast(`${t("error")}: ${err.message}`, "error");
+    } finally {
+      UI.finishBackgroundTask(taskId);
     }
   },
 
@@ -1492,8 +1525,11 @@ const App = {
     const targetPath = path || Array.from(AppState.selectedItems)[0];
     if (!targetPath) return;
 
+    const taskId = UI.startBackgroundTask(
+      t("extract_start_toast"),
+      t("background_operation_running")
+    );
     try {
-      UI.toast(t("extract_start_toast"), "info", 3000);
       let res;
       try {
         res = await API.extractArchive(targetPath);
@@ -1554,6 +1590,8 @@ const App = {
       this.refreshSystemStats();
     } catch (err) {
       UI.toast(err.message, "error");
+    } finally {
+      UI.finishBackgroundTask(taskId);
     }
   },
 
