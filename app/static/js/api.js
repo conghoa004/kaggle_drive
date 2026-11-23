@@ -160,6 +160,10 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items })
     });
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+      throw new Error("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.");
+    }
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.detail || "Không thể tải tệp nén");

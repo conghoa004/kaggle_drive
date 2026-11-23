@@ -2115,7 +2115,13 @@ const App = {
 
   terminalPath(cwd) {
     const suffix = (cwd || "").replace(/^\/+|\/+$/g, "");
-    return suffix ? "/kaggle/working/" + suffix : "/kaggle/working";
+    const configuredRoot = String(AppState.rootDir || "/kaggle/working");
+    const root = configuredRoot.replace(/[\\/]+$/, "") ||
+      (configuredRoot.startsWith("\\") ? "\\" : "/");
+    const separator = root.endsWith("/") || root.endsWith("\\")
+      ? ""
+      : (root.includes("\\") && !root.includes("/") ? "\\" : "/");
+    return suffix ? root + separator + suffix : root;
   },
 
   renderTerminalTabs() {

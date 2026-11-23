@@ -668,6 +668,12 @@ class FileService:
             if folder_name.endswith(".tar"):
                 folder_name = Path(folder_name).stem
             dest_dir = archive_path.parent / folder_name
+        root_dir = get_root_dir().resolve()
+        destination_directories_created = []
+        cursor = dest_dir
+        while cursor != root_dir and not cursor.exists():
+            destination_directories_created.append(cursor)
+            cursor = cursor.parent
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_root = dest_dir.resolve()
 
@@ -787,8 +793,34 @@ class FileService:
             if conflicts:
                 raise _overwrite_required(conflicts, max_paths=MAX_EXTRACT_REVIEW_PATHS)
 
+        transaction_dir = None
+        published_files: List[Path] = []
+        backed_up_files: Dict[Path, Path] = {}
+        created_directories = set(destination_directories_created)
+
+        def ensure_transaction_dir() -> None:
+            nonlocal transaction_dir
+            if transaction_dir is None:
+                transaction_dir = Path(
+                    tempfile.mkdtemp(prefix=".extract-rollback-", dir=dest_root)
+                )
+
+        def ensure_directory(directory: Path) -> None:
+            missing = []
+            cursor = directory
+            while cursor != dest_root and not cursor.exists():
+                missing.append(cursor)
+                cursor = cursor.parent
+            if cursor.exists() and not cursor.is_dir():
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "path_conflict", "message": "Extraction path conflicts with an existing file."},
+                )
+            directory.mkdir(parents=True, exist_ok=True)
+            created_directories.update(missing)
+
         def copy_member(source, target: Path, expected_size: int, allow_overwrite: bool) -> None:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            ensure_directory(target.parent)
             remaining = expected_size
             temp_path = None
             try:
@@ -810,12 +842,29 @@ class FileService:
                         )
 
                 if allow_overwrite:
-                    os.replace(temp_path, target)
+                    backup_path = None
+                    if target.exists():
+                        ensure_transaction_dir()
+                        backup_path = transaction_dir / ("backup-" + str(len(backed_up_files)))
+                        os.replace(target, backup_path)
+                        backed_up_files[target] = backup_path
+                    try:
+                        os.replace(temp_path, target)
+                        published_files.append(target)
+                    except Exception:
+                        if backup_path is not None:
+                            try:
+                                os.replace(backup_path, target)
+                                backed_up_files.pop(target, None)
+                            except OSError:
+                                pass
+                        raise
                 else:
                     try:
                         os.link(temp_path, target)
                     except FileExistsError:
                         raise _overwrite_required([target.relative_to(dest_root).as_posix()])
+                    published_files.append(target)
                     temp_path.unlink()
                 temp_path = None
             except Exception:
@@ -852,10 +901,11 @@ class FileService:
                             (member, safe_member_path(member.filename), is_directory)
                         )
                     validate_extraction_targets(checked_members)
+                    ensure_transaction_dir()
 
                     for member, member_path, is_directory in checked_members:
                         if is_directory:
-                            member_path.mkdir(parents=True, exist_ok=True)
+                            ensure_directory(member_path)
                         else:
                             relative_path = member_path.relative_to(dest_root).as_posix()
                             if not overwrite and relative_path in skip_paths and member_path.exists():
@@ -885,10 +935,11 @@ class FileService:
                             (member, safe_member_path(member.name), member.isdir())
                         )
                     validate_extraction_targets(checked_members)
+                    ensure_transaction_dir()
 
                     for member, member_path, is_directory in checked_members:
                         if is_directory:
-                            member_path.mkdir(parents=True, exist_ok=True)
+                            ensure_directory(member_path)
                         else:
                             relative_path = member_path.relative_to(dest_root).as_posix()
                             if not overwrite and relative_path in skip_paths and member_path.exists():
@@ -935,10 +986,11 @@ class FileService:
                             (member, safe_member_path(member.filename), member.is_dir())
                         )
                     validate_extraction_targets(checked_members)
+                    ensure_transaction_dir()
 
                     for member, member_path, is_directory in checked_members:
                         if is_directory:
-                            member_path.mkdir(parents=True, exist_ok=True)
+                            ensure_directory(member_path)
                         else:
                             relative_path = member_path.relative_to(dest_root).as_posix()
                             if not overwrite and relative_path in skip_paths and member_path.exists():
@@ -961,9 +1013,37 @@ class FileService:
             if not extracted_count and not skipped_count:
                 raise HTTPException(status_code=400, detail="Archive contains no entries.")
         except Exception as exc:
+            rollback_errors = []
+            for target in reversed(published_files):
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError as rollback_exc:
+                    rollback_errors.append(rollback_exc)
+            for target, backup_path in reversed(list(backed_up_files.items())):
+                try:
+                    os.replace(backup_path, target)
+                except OSError as rollback_exc:
+                    rollback_errors.append(rollback_exc)
+            for directory in sorted(
+                created_directories, key=lambda path: len(path.parts), reverse=True
+            ):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            if rollback_errors:
+                detail = "Extraction failed and rollback was incomplete."
+                if transaction_dir is not None:
+                    detail += f" Recovery files remain in '{transaction_dir.name}'."
+                raise HTTPException(status_code=500, detail=detail) from exc
+            if transaction_dir is not None:
+                shutil.rmtree(transaction_dir, ignore_errors=True)
             if isinstance(exc, HTTPException):
                 raise
             raise HTTPException(status_code=500, detail=f"Could not extract archive: {exc}")
+
+        if transaction_dir is not None:
+            shutil.rmtree(transaction_dir, ignore_errors=True)
 
         message = f"Extracted {extracted_count} entries to '{dest_dir.name}'."
         if skipped_count:
