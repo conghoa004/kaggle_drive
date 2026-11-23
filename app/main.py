@@ -14,6 +14,7 @@ from app.routes.system_routes import router as system_router
 from app.routes.view_routes import router as view_router
 from app.services.port_service import port_manager
 from app.services.file_service import FileService, UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS
+from app.services.persistent_pty_service import PtyTerminalService
 
 
 async def _upload_chunk_cleanup_loop():
@@ -31,6 +32,7 @@ async def app_lifespan(_app: FastAPI):
     finally:
         cleanup_task.cancel()
         await asyncio.gather(cleanup_task, return_exceptions=True)
+        await PtyTerminalService.stop_all()
         port_manager.stop_all()
 
 

@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, WebSocket
 from app.security import require_auth
 from app.services.system_service import SystemService
-from app.services.pty_terminal_service import PtyTerminalService
+from app.services.persistent_pty_service import PtyTerminalService
 from app.services.port_service import port_manager
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -75,6 +75,13 @@ def close_port_tunnel(request: Request, port: int):
 
 @router.websocket("/terminal/ws")
 async def run_terminal_pty(websocket: WebSocket):
-    """Open an authenticated interactive PTY session for the browser terminal."""
+    """Attach to an authenticated interactive PTY session."""
     await PtyTerminalService.serve(websocket)
+
+
+@router.delete("/terminal/{session_id}")
+async def close_terminal_session(request: Request, session_id: str):
+    """Terminate one authenticated terminal session."""
+    require_auth(request)
+    return await PtyTerminalService.close_session(session_id)
 

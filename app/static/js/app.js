@@ -51,7 +51,7 @@ const App = {
   bindEvents() {
     // Auth unauthorized listener
     window.addEventListener("auth:unauthorized", () => {
-      this.closeTerminalSession();
+      this.closeTerminalSession({ terminate: false, preserveStored: true });
       AppState.fileClipboard = null;
       this.updateFileClipboardBar();
       this.showLoginView();
@@ -76,7 +76,7 @@ const App = {
         }
         const terminalModal = document.getElementById("terminalModal");
         if (terminalModal && terminalModal.classList.contains("show")) {
-          this.setTerminalMinimized(true);
+          this.minimizeTerminal();
         }
         UI.closeAllModals();
       } else if ((e.key === "Delete" || (e.ctrlKey && e.key === "Backspace")) && !isEditable) {
@@ -251,6 +251,8 @@ const App = {
       if (userEl) userEl.textContent = userData.username;
     }
 
+    this.restoreTerminalSessions();
+
     const savedNavigation = localStorage.getItem("kaggle_drive_active_navigation");
     if (savedNavigation === "navPorts") {
       this.openPortsPage();
@@ -290,7 +292,7 @@ const App = {
   },
 
   async handleLogout() {
-    this.closeTerminalSession();
+    await this.closeTerminalSession();
     try {
       await API.logout();
     } catch (_) {}
@@ -2102,12 +2104,90 @@ const App = {
 
   terminalTabs: [],
   activeTerminalTabId: null,
+  terminalStorageKey: "kaggle_drive_terminal_tabs_v1",
   terminalInstance: null,
   terminalFitAddon: null,
   terminalSocket: null,
   terminalResizeObserver: null,
   terminalPendingInput: [],
   terminalRequestedCwd: null,
+
+  newTerminalSessionId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+      window.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  },
+
+  persistTerminalTabs() {
+    try {
+      sessionStorage.setItem(this.terminalStorageKey, JSON.stringify({
+        activeId: this.activeTerminalTabId,
+        wasOpen: Boolean(document.getElementById("terminalModal")?.classList.contains("show")),
+        tabs: this.terminalTabs.map(tab => ({
+          id: tab.id,
+          title: tab.title,
+          cwd: tab.cwd,
+          sessionId: tab.sessionId
+        }))
+      }));
+    } catch (_) {}
+  },
+
+  restoreTerminalSessions() {
+    if (this.terminalTabs.length) return;
+    let saved;
+    try {
+      saved = JSON.parse(sessionStorage.getItem(this.terminalStorageKey) || "null");
+    } catch (_) {
+      return;
+    }
+    if (!saved || !Array.isArray(saved.tabs)) return;
+    const wasOpen = Boolean(saved.wasOpen);
+
+    const usedSessionIds = new Set();
+    const usedTabIds = new Set();
+    const restored = [];
+    for (const record of saved.tabs.slice(0, 4)) {
+      if (
+        !record ||
+        !/^terminal-[1-4]$/.test(record.id || "") ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.sessionId || "") ||
+        usedTabIds.has(record.id) ||
+        usedSessionIds.has(record.sessionId)
+      ) continue;
+      usedTabIds.add(record.id);
+      usedSessionIds.add(record.sessionId);
+      const tab = this.createTerminalTab(String(record.cwd || ""), {
+        id: record.id,
+        title: String(record.title || record.id),
+        sessionId: record.sessionId,
+        restored: true
+      });
+      if (tab) restored.push(tab);
+    }
+    if (!restored.length) return;
+
+    const activeTab = restored.find(tab => tab.id === saved.activeId) || restored[0];
+    this.activateTerminalTab(activeTab.id);
+    if (wasOpen) {
+      this.setTerminalMinimized(false);
+      UI.openModal("terminalModal");
+    } else {
+      this.setTerminalMinimized(true);
+    }
+    this.persistTerminalTabs();
+    restored.forEach(tab => this.connectTerminal(tab));
+  },
 
   getActiveTerminalTab() {
     return this.terminalTabs.find(tab => tab.id === this.activeTerminalTabId) || null;
@@ -2179,7 +2259,7 @@ const App = {
     if (terminalWindow) terminalWindow.classList.toggle("hidden", !hasTabs);
   },
 
-  createTerminalTab(cwd = "") {
+  createTerminalTab(cwd = "", options = {}) {
     if (this.terminalTabs.length >= 4) {
       UI.toast(t("terminal_max_tabs"), "warning");
       return null;
@@ -2189,9 +2269,13 @@ const App = {
     let number = 1;
     while (usedNumbers.has(number)) number += 1;
     const tab = {
-      id: "terminal-" + number,
-      title: "Terminal " + number,
+      id: options.id || "terminal-" + number,
+      title: options.title || "Terminal " + number,
       cwd: cwd || "",
+      sessionId: options.sessionId || this.newTerminalSessionId(),
+      restoredFromStorage: Boolean(options.restored),
+      needsReplay: Boolean(options.restored),
+      connectedOnce: Boolean(options.restored),
       status: "connecting",
       instance: null,
       fitAddon: null,
@@ -2211,6 +2295,7 @@ const App = {
     this.initTerminalEmulator(tab);
     this.renderTerminalTabs();
     this.activateTerminalTab(tab.id);
+    this.persistTerminalTabs();
     return tab;
   },
 
@@ -2225,6 +2310,7 @@ const App = {
 
     this.setTerminalMinimized(false);
     UI.openModal("terminalModal");
+    this.persistTerminalTabs();
     this.activateTerminalTab(tab.id);
     setTimeout(() => {
       if (this.activeTerminalTabId !== tab.id) return;
@@ -2242,6 +2328,7 @@ const App = {
     this.toggleMobileSidebar(false);
     this.setTerminalMinimized(false);
     UI.openModal("terminalModal");
+    this.persistTerminalTabs();
     const tab = this.createTerminalTab(AppState.currentPath || "");
     if (!tab) return;
     setTimeout(() => {
@@ -2267,6 +2354,7 @@ const App = {
     this.terminalPendingInput = tab.pendingInput;
     this.terminalRequestedCwd = tab.cwd;
     AppState.terminalCwd = tab.cwd;
+    this.persistTerminalTabs();
 
     const header = document.getElementById("terminalHeaderTitle");
     if (header) header.textContent = tab.title + " — bash";
@@ -2275,7 +2363,8 @@ const App = {
     requestAnimationFrame(() => {
       if (this.activeTerminalTabId !== tab.id) return;
       this.fitTerminal(tab);
-      if (tab.instance) tab.instance.focus();
+      const terminalModal = document.getElementById("terminalModal");
+      if (tab.instance && terminalModal?.classList.contains("show")) tab.instance.focus();
     });
   },
 
@@ -2327,7 +2416,17 @@ const App = {
     }
     if (tab.socket && tab.socket.readyState <= WebSocket.OPEN) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const terminalParams = new URLSearchParams({ cwd: tab.cwd || "" });
+    const wasReconnectingSession = Boolean(
+      tab.restoredFromStorage || tab.connectedOnce || tab.needsReplay
+    );
+    const terminalParams = new URLSearchParams({
+      cwd: tab.cwd || "",
+      session_id: tab.sessionId
+    });
+    if (tab.needsReplay || tab.connectedOnce) {
+      terminalParams.set("replay", "1");
+      tab.instance.clear();
+    }
     const url = protocol + "//" + window.location.host + "/api/system/terminal/ws?" + terminalParams.toString();
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
@@ -2351,7 +2450,10 @@ const App = {
       }, 10000);
       this.renderTerminalTabs();
       this.fitTerminal(tab);
-      if (this.activeTerminalTabId === tab.id) tab.instance.focus();
+      const terminalModal = document.getElementById("terminalModal");
+      if (this.activeTerminalTabId === tab.id && terminalModal?.classList.contains("show")) {
+        tab.instance.focus();
+      }
       for (const data of tab.pendingInput.splice(0)) {
         socket.send(JSON.stringify({ type: "input", data }));
       }
@@ -2367,6 +2469,26 @@ const App = {
         try {
           const message = JSON.parse(event.data);
           if (message.type === "pong") return;
+          if (message.type === "session") {
+            tab.sessionId = message.session_id || tab.sessionId;
+            if (wasReconnectingSession && !message.resumed) {
+              tab.instance.writeln("\r\n\x1b[33mThe previous terminal session is no longer available; a new shell was started.\x1b[0m");
+            }
+            tab.connectedOnce = true;
+            tab.needsReplay = false;
+            tab.restoredFromStorage = false;
+            this.persistTerminalTabs();
+            return;
+          }
+          if (message.type === "history_truncated") {
+            tab.instance.writeln("\x1b[33mEarlier terminal output was truncated while disconnected.\x1b[0m");
+            return;
+          }
+          if (message.type === "exit") {
+            tab.status = "disconnected";
+            this.renderTerminalTabs();
+            return;
+          }
           if (message.type === "error") {
             tab.serverSentTerminalError = true;
             tab.serverTerminalErrorMessage = message.message || "Terminal error";
@@ -2395,6 +2517,7 @@ const App = {
       const wasCurrentSocket = tab.socket === socket;
       if (wasCurrentSocket) {
         tab.socket = null;
+        if (tab.connectedOnce || tab.restoredFromStorage) tab.needsReplay = true;
         tab.status = tab.serverSentTerminalError && event.code !== 1013 ? "error" : "disconnected";
         if (this.activeTerminalTabId === tab.id) this.terminalSocket = null;
         this.renderTerminalTabs();
@@ -2441,9 +2564,13 @@ const App = {
   minimizeTerminal() {
     this.setTerminalMinimized(true);
     UI.closeModal("terminalModal");
+    this.persistTerminalTabs();
   },
 
-  disposeTerminalTab(tab) {
+  disposeTerminalTab(tab, terminate = true) {
+    if (terminate && tab.sessionId) {
+      API.closeTerminalSession(tab.sessionId).catch(() => {});
+    }
     if (tab.heartbeatTimer !== null) {
       window.clearInterval(tab.heartbeatTimer);
       tab.heartbeatTimer = null;
@@ -2490,6 +2617,7 @@ const App = {
       if (header) header.textContent = t("terminal_title");
       this.renderTerminalTabs();
     }
+    this.persistTerminalTabs();
   },
 
   closeTerminalWindow() {
@@ -2497,9 +2625,13 @@ const App = {
     UI.closeModal("terminalModal");
   },
 
-  closeTerminalSession() {
+  async closeTerminalSession({ terminate = true, preserveStored = false } = {}) {
     this.setTerminalMinimized(false);
-    this.terminalTabs.slice().forEach(tab => this.disposeTerminalTab(tab));
+    const tabs = this.terminalTabs.slice();
+    const closeRequests = terminate
+      ? tabs.map(tab => API.closeTerminalSession(tab.sessionId).catch(() => null))
+      : [];
+    tabs.forEach(tab => this.disposeTerminalTab(tab, false));
     this.terminalTabs = [];
     this.activeTerminalTabId = null;
     this.terminalInstance = null;
@@ -2511,6 +2643,10 @@ const App = {
     const header = document.getElementById("terminalHeaderTitle");
     if (header) header.textContent = t("terminal_title");
     this.renderTerminalTabs();
+    if (!preserveStored) {
+      try { sessionStorage.removeItem(this.terminalStorageKey); } catch (_) {}
+    }
+    await Promise.allSettled(closeRequests);
   },
 
   sendTerminalInput(data, tab = this.getActiveTerminalTab()) {
@@ -2542,7 +2678,12 @@ const App = {
 
   clearTerminal() {
     const tab = this.getActiveTerminalTab();
-    if (tab && tab.instance) tab.instance.clear();
+    if (tab && tab.instance) {
+      tab.instance.clear();
+      if (tab.socket && tab.socket.readyState === WebSocket.OPEN) {
+        tab.socket.send(JSON.stringify({ type: "clear" }));
+      }
+    }
   },
 
   copyTerminalOutput() {

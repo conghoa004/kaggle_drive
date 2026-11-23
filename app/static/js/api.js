@@ -198,6 +198,10 @@ const API = {
 
   stopPortTunnel(port) {
     return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "DELETE" });
+  },
+
+  closeTerminalSession(sessionId) {
+    return this.request("/api/system/terminal/" + encodeURIComponent(sessionId), { method: "DELETE" });
   }
 };
 
