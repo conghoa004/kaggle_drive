@@ -131,6 +131,45 @@ def get_safe_path(relative_path: str = "", must_exist: bool = True) -> Path:
     return target
 
 
+def get_safe_path_entry(relative_path: str = "", must_exist: bool = True) -> Path:
+    """Validate an in-root entry while preserving a final symlink."""
+    clean_path = (relative_path or "").strip().lstrip("/\\")
+    root_dir = get_root_dir().resolve()
+    if not clean_path:
+        return root_dir
+
+    candidate = root_dir / clean_path
+    if candidate == root_dir:
+        return root_dir
+
+    try:
+        parent = candidate.parent.resolve()
+        parent.relative_to(root_dir)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Path is outside the configured root.",
+        )
+
+    target = parent / candidate.name
+    if not target.is_symlink():
+        target = target.resolve()
+        try:
+            target.relative_to(root_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Path is outside the configured root.",
+            )
+
+    if must_exist and not target.exists() and not target.is_symlink():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File or directory does not exist.",
+        )
+    return target
+
+
 def require_auth(request: Request):
     """
     Dependency or middleware check to ensure user has active authenticated session.

@@ -1158,7 +1158,7 @@ const Previewer = {
       sheetTabsHtml = `
         <div class="spreadsheet-sheet-tabs">
           ${state.sheetNames.map(s => `
-            <button class="sheet-tab-pill ${s === state.activeSheet ? 'active' : ''}" onclick="Previewer.switchSheet('${UI.escape(s).replace(/'/g, "\\'")}')">
+            <button class="sheet-tab-pill ${s === state.activeSheet ? 'active' : ''}" onclick="Previewer.switchSheet('${UI.inlineJsString(s)}')">
               <i class="fa-solid fa-table-cells text-emerald-400"></i>
               <span>${UI.escape(s)}</span>
               <span class="text-[10px] opacity-60">(${state.sheets[s] ? state.sheets[s].length : 0})</span>

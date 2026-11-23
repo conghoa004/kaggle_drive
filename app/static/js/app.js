@@ -387,7 +387,7 @@ const App = {
         const isLast = idx === parts.length - 1;
         html += `
           <span class="breadcrumb-sep"><i class="fa-solid fa-chevron-right" style="font-size: 10px;"></i></span>
-          <span class="breadcrumb-crumb ${isLast ? 'active' : ''}" onclick="App.loadDirectory('${accum.replace(/'/g, "\\'")}', true, '${AppState.isServicesMode ? "services" : "storage"}')">
+          <span class="breadcrumb-crumb ${isLast ? 'active' : ''}" onclick="App.loadDirectory('${UI.inlineJsString(accum)}', true, '${AppState.isServicesMode ? "services" : "storage"}')">
             ${UI.escape(part)}
           </span>
         `;

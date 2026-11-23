@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import HTTPException, UploadFile, status
 
 from app.config import settings
-from app.security import get_root_dir, get_safe_path
+from app.security import get_root_dir, get_safe_path, get_safe_path_entry
 
 # Extended MIME types and category classification
 EXTENSION_CATEGORIES = {
@@ -417,14 +417,16 @@ class FileService:
     @staticmethod
     def delete_item(rel_path: str) -> Dict[str, Any]:
         """Delete a file or recursively delete a directory."""
-        target = get_safe_path(rel_path, must_exist=True)
+        target = get_safe_path_entry(rel_path, must_exist=True)
 
         # Prevent deleting ROOT_DIR itself
-        if target.resolve() == get_root_dir().resolve():
+        if not target.is_symlink() and target.resolve() == get_root_dir().resolve():
             raise HTTPException(status_code=403, detail="Không thể xóa thư mục gốc!")
 
         try:
-            if target.is_dir():
+            if target.is_symlink():
+                target.unlink()
+            elif target.is_dir():
                 shutil.rmtree(target)
             else:
                 target.unlink()
@@ -436,7 +438,7 @@ class FileService:
     @staticmethod
     def rename_item(rel_path: str, new_name: str) -> Dict[str, Any]:
         """Rename a file or folder safely within its parent directory."""
-        target = get_safe_path(rel_path, must_exist=True)
+        target = get_safe_path_entry(rel_path, must_exist=True)
 
         # Sanitize new_name to avoid path injection
         clean_new_name = os.path.basename(new_name.strip())
@@ -444,7 +446,7 @@ class FileService:
             raise HTTPException(status_code=400, detail="Tên mới không hợp lệ.")
 
         new_target = target.parent / clean_new_name
-        if new_target.exists():
+        if new_target.exists() or new_target.is_symlink():
             raise HTTPException(status_code=400, detail="Tên mới đã tồn tại.")
 
         try:
@@ -462,7 +464,9 @@ class FileService:
     @staticmethod
     def copy_item(source_rel: str, dest_folder_rel: str) -> Dict[str, Any]:
         """Copy an item while rejecting recursive directory copies."""
-        source = get_safe_path(source_rel, must_exist=True)
+        source = get_safe_path_entry(source_rel, must_exist=True)
+        if source.is_symlink():
+            raise HTTPException(status_code=400, detail="Symbolic links cannot be copied.")
         dest_folder = get_safe_path(dest_folder_rel, must_exist=True)
         if not dest_folder.is_dir():
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
@@ -506,12 +510,12 @@ class FileService:
     @staticmethod
     def move_item(source_rel: str, dest_folder_rel: str) -> Dict[str, Any]:
         """Move an item while rejecting moves into its own subtree."""
-        source = get_safe_path(source_rel, must_exist=True)
+        source = get_safe_path_entry(source_rel, must_exist=True)
         dest_folder = get_safe_path(dest_folder_rel, must_exist=True)
         if not dest_folder.is_dir():
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
 
-        if source.is_dir():
+        if source.is_dir() and not source.is_symlink():
             try:
                 dest_folder.resolve().relative_to(source.resolve())
             except ValueError:
@@ -523,7 +527,7 @@ class FileService:
                 )
 
         dest_item = dest_folder / source.name
-        if dest_item.exists():
+        if dest_item.exists() or dest_item.is_symlink():
             raise HTTPException(
                 status_code=400,
                 detail=f"'{source.name}' already exists in the destination.",
@@ -538,7 +542,7 @@ class FileService:
     @staticmethod
     def duplicate_item(source_rel: str) -> Dict[str, Any]:
         """Duplicate a file or folder in place."""
-        source = get_safe_path(source_rel, must_exist=True)
+        source = get_safe_path_entry(source_rel, must_exist=True)
         dest_folder = source.parent
         return FileService.copy_item(source_rel, str(dest_folder.relative_to(get_root_dir())).replace("\\", "/"))
 

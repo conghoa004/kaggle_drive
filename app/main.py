@@ -39,7 +39,7 @@ class RequestBodyLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("method") != "POST":
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
@@ -52,10 +52,9 @@ class RequestBodyLimitMiddleware:
             "/api/files/download-selected-zip": 8 * 1024 * 1024,
             "/api/files/compress": 8 * 1024 * 1024,
         }
-        limit = limits.get(scope.get("path", ""))
-        if limit is None:
-            await self.app(scope, receive, send)
-            return
+        # Endpoints with larger expected payloads are listed above.
+        # Keep all other HTTP request bodies small by default.
+        limit = limits.get(scope.get("path", ""), 1024 * 1024)
 
         raw_length = next((value for name, value in scope.get("headers", []) if name.lower() == b"content-length"), None)
         if raw_length is not None:
@@ -108,6 +107,34 @@ class RequestBodyLimitMiddleware:
             return
 
 
+class RequestAuthGateMiddleware:
+    """Reject protected API calls before FastAPI parses their request body."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        protected = any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in ("/api/files", "/api/system", "/api/services")
+        )
+        if scope.get("type") == "http" and protected:
+            if scope.get("session", {}).get("authenticated") is not True:
+                body = json.dumps({"detail": "Not authenticated."}).encode("utf-8")
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode("ascii")),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
 class ServicesFileRootMiddleware:
     def __init__(self, app):
         self.app = app
@@ -139,6 +166,10 @@ def create_app() -> FastAPI:
         lifespan=app_lifespan
     )
 
+    # Middleware is registered inside-out: the auth gate runs after SessionMiddleware
+    # but before FastAPI reads request bodies.
+    app.add_middleware(RequestBodyLimitMiddleware)
+    app.add_middleware(RequestAuthGateMiddleware)
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.SECRET_KEY,
@@ -153,7 +184,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(RequestBodyLimitMiddleware)
     app.add_middleware(ServicesFileRootMiddleware)
 
     static_dir = Path(__file__).resolve().parent / "static"

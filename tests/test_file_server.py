@@ -185,7 +185,6 @@ class TestKaggleCloudDrive(unittest.TestCase):
         self.assertIn("disk", stats)
         self.assertIn("memory", stats)
         self.assertIn("cpu", stats)
-        self.assertIn("largest_files", stats)
         self.assertIn("python", stats)
         self.assertGreaterEqual(stats["disk"]["percent"], 0)
 

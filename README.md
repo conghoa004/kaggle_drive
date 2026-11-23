@@ -22,7 +22,7 @@ This README describes the `main` branch. The `coder` branch additionally contain
 - Create files and folders, rename, duplicate, delete, and extract supported archives (ZIP, TAR, and RAR).
 - Copy a cURL command for downloading a file from the server.
 
-The default managed root is `/`. Use `--root` or `KAGGLE_DRIVE_ROOT` to limit the app to a narrower directory, especially during local development.
+The default managed root is `/` on Kaggle and `./workspace` elsewhere. Override it with `--root` or `KAGGLE_DRIVE_ROOT` to use another directory.
 
 ### File preview and spreadsheet editor
 
@@ -163,7 +163,7 @@ Copy `.env.example` to `.env` and edit it before starting the app. CLI options o
 
 | Variable | Default | Description |
 |---|---|---|
-| `KAGGLE_DRIVE_ROOT` | `/` | Managed root directory. Set a narrower directory for local use. |
+| `KAGGLE_DRIVE_ROOT` | `/` on Kaggle, `./workspace` elsewhere | Managed root directory. Set a narrower directory when needed. |
 | `KAGGLE_DRIVE_HOST` | `127.0.0.1` | Web server bind address. |
 | `KAGGLE_DRIVE_PORT` | `8000` | Web server port. |
 | `KAGGLE_DRIVE_USERNAME` | `admin` | Login username. |
