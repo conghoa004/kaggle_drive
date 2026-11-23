@@ -17,17 +17,10 @@ const AppState = {
   searchQuery: "",
   systemStats: null,
   ports: [],
-  portsError: "",
-  services: [],
-  servicesError: "",
-  serviceTasks: {},
-  servicesPath: localStorage.getItem("kaggle_drive_services_path") || "",
-  isServicesMode: false
+  portsError: ""
 };
 
 const App = {
-  serviceCredentialsModalData: null,
-  serviceCredentialsRequestId: 0,
   clipboardPasteInProgress: false,
 
   init() {
@@ -53,21 +46,12 @@ const App = {
     if (portsPage && !portsPage.classList.contains("hidden")) {
       this.renderPortsPage();
     }
-    if (AppState.isServicesMode) {
-      this.renderBreadcrumb();
-      this.renderFiles();
-    }
-    const credentialsModal = document.getElementById("serviceCredentialsModal");
-    if (credentialsModal && credentialsModal.classList.contains("show")) {
-      if (this.serviceCredentialsModalData) this.renderServiceCredentialsModal();
-    }
   },
 
   bindEvents() {
     // Auth unauthorized listener
     window.addEventListener("auth:unauthorized", () => {
       this.closeTerminalSession();
-      this.clearServicesState();
       AppState.fileClipboard = null;
       this.updateFileClipboardBar();
       this.showLoginView();
@@ -188,33 +172,12 @@ const App = {
     } catch (_) {}
   },
 
-  clearServicesState() {
-    AppState.services = [];
-    AppState.servicesError = "";
-    AppState.serviceTasks = {};
-    AppState.isServicesMode = false;
-    this.clearServiceCredentialsModal();
-  },
-
-  clearServiceCredentialsModal() {
-    this.serviceCredentialsRequestId += 1;
-    this.serviceCredentialsModalData = null;
-    const body = document.getElementById("serviceCredentialsBody");
-    if (body) body.replaceChildren();
-    const modal = document.getElementById("serviceCredentialsModal");
-    if (modal) modal.classList.remove("show");
-  },
-
   openStorageFolder() {
-    this.loadDirectory(AppState.storagePath || "", true, "storage");
+    this.loadDirectory(AppState.storagePath || "", true);
   },
 
   refreshCurrentDirectory() {
-    return this.loadDirectory(AppState.currentPath, false, AppState.isServicesMode ? "services" : "storage");
-  },
-
-  openServicesFolder() {
-    this.openServicesPage();
+    return this.loadDirectory(AppState.currentPath, false);
   },
 
   async checkAuthStatus() {
@@ -289,9 +252,7 @@ const App = {
     }
 
     const savedNavigation = localStorage.getItem("kaggle_drive_active_navigation");
-    if (savedNavigation === "navServices") {
-      this.openServicesPage();
-    } else if (savedNavigation === "navPorts") {
+    if (savedNavigation === "navPorts") {
       this.openPortsPage();
     } else {
       this.loadDirectory(AppState.currentPath);
@@ -330,7 +291,6 @@ const App = {
 
   async handleLogout() {
     this.closeTerminalSession();
-    this.clearServicesState();
     try {
       await API.logout();
     } catch (_) {}
@@ -344,34 +304,24 @@ const App = {
     this.showLoginView();
   },
 
-  async loadDirectory(path = "", resetSearch = true, mode = "auto") {
+  async loadDirectory(path = "", resetSearch = true) {
     this.hideContextMenu();
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
-    const serviceNav = document.getElementById("navServices");
-    const isServicesMode = mode === "services" || (mode === "auto" && Boolean(serviceNav && serviceNav.classList.contains("active")));
     if (mainContent) mainContent.classList.remove("hidden");
     if (portsPage) {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
     const normalizedPath = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
-    AppState.isServicesMode = isServicesMode;
-    this.setActiveNavigation(isServicesMode ? "navServices" : "navStorage");
+    this.setActiveNavigation("navStorage");
     AppState.currentPath = normalizedPath;
-    if (isServicesMode) {
-      AppState.servicesPath = normalizedPath;
-      try {
-        localStorage.setItem("kaggle_drive_services_path", normalizedPath);
-      } catch (_) {}
-    } else {
-      AppState.storagePath = normalizedPath;
-      try {
-        localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
-        localStorage.setItem("kaggle_drive_current_path", normalizedPath);
-      } catch (_) {}
-    }
+    AppState.storagePath = normalizedPath;
+    try {
+      localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
+      localStorage.setItem("kaggle_drive_current_path", normalizedPath);
+    } catch (_) {}
     AppState.selectedItems.clear();
     AppState.lastSelectedPath = null;
     this.updateSelectionBar();
@@ -399,8 +349,8 @@ const App = {
     if (!container) return;
 
     let html = `
-      <span class="breadcrumb-crumb ${!AppState.currentPath ? 'active' : ''}" onclick="App.loadDirectory('', true, '${AppState.isServicesMode ? "services" : "storage"}')">
-        <i class="fa-solid ${AppState.isServicesMode ? "fa-folder-tree text-amber-500" : "fa-house-chimney icon-python"}"></i> ${AppState.isServicesMode ? "services" : "working"}
+      <span class="breadcrumb-crumb ${!AppState.currentPath ? 'active' : ''}" onclick="App.loadDirectory('', true)">
+        <i class="fa-solid fa-house-chimney icon-python"></i> working
       </span>
     `;
 
@@ -412,7 +362,7 @@ const App = {
         const isLast = idx === parts.length - 1;
         html += `
           <span class="breadcrumb-sep"><i class="fa-solid fa-chevron-right" style="font-size: 10px;"></i></span>
-          <span class="breadcrumb-crumb ${isLast ? 'active' : ''}" onclick="App.loadDirectory('${UI.inlineJsString(accum)}', true, '${AppState.isServicesMode ? "services" : "storage"}')">
+          <span class="breadcrumb-crumb ${isLast ? 'active' : ''}" onclick="App.loadDirectory('${UI.inlineJsString(accum)}', true)">
             ${UI.escape(part)}
           </span>
         `;
@@ -753,7 +703,6 @@ const App = {
     AppState.fileClipboard = {
       operation,
       paths: uniquePaths,
-      scope: AppState.isServicesMode ? "services" : "storage"
     };
     this.updateFileClipboardBar();
     this.updateSelectionUI();
@@ -766,7 +715,6 @@ const App = {
     const clipboard = AppState.fileClipboard;
     return Boolean(
       clipboard && clipboard.operation === "cut" &&
-      clipboard.scope === (AppState.isServicesMode ? "services" : "storage") &&
       clipboard.paths.includes(path)
     );
   },
@@ -802,11 +750,6 @@ const App = {
       return;
     }
 
-    const targetScope = AppState.isServicesMode ? "services" : "storage";
-    if (clipboard.scope !== targetScope) {
-      UI.toast(t("clipboard_scope_error"), "warning");
-      return;
-    }
     if (this.clipboardPasteInProgress) return;
 
     const targetPath = String(targetFolder || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
@@ -828,9 +771,9 @@ const App = {
       for (const sourcePath of pathsToPaste) {
         try {
           if (clipboard.operation === "cut") {
-            await API.moveItem(sourcePath, targetPath, clipboard.scope);
+            await API.moveItem(sourcePath, targetPath);
           } else {
-            await API.copyItem(sourcePath, targetPath, clipboard.scope);
+            await API.copyItem(sourcePath, targetPath);
           }
           succeeded.push(sourcePath);
         } catch (error) {
@@ -847,7 +790,7 @@ const App = {
       }
 
       if (succeeded.length) {
-        await this.loadDirectory(targetPath, false, clipboard.scope);
+        await this.loadDirectory(targetPath, false);
         this.refreshSystemStats();
       }
       if (failed.length) {
@@ -1299,13 +1242,13 @@ const App = {
 
   downloadFile(path) {
     this.hideContextMenu();
-    window.location.href = API.withFileScope(`/api/files/download?path=${encodeURIComponent(path)}`);
+    window.location.href = `/api/files/download?path=${encodeURIComponent(path)}`;
   },
 
   downloadZip(path = "") {
     this.hideContextMenu();
     const targetPath = path || AppState.currentPath;
-    window.location.href = API.withFileScope(`/api/files/download-zip?path=${encodeURIComponent(targetPath)}`);
+    window.location.href = `/api/files/download-zip?path=${encodeURIComponent(targetPath)}`;
   },
 
   previewItem(path) {
@@ -1879,139 +1822,6 @@ const App = {
     }
   },
 
-  async openServicesPage() {
-    this.toggleMobileSidebar(false);
-    const mainContent = document.getElementById("mainContentArea");
-    const portsPage = document.getElementById("portManagerPage");
-    if (mainContent) mainContent.classList.remove("hidden");
-    if (portsPage) {
-      portsPage.classList.add("hidden");
-      portsPage.style.display = "none";
-    }
-    AppState.isServicesMode = true;
-    this.setActiveNavigation("navServices");
-    await this.loadDirectory(AppState.servicesPath || "", false, "services");
-  },
-
-  async refreshServicesPage() {
-    return this.loadDirectory(AppState.servicesPath || "", false, "services");
-  },
-  async openServiceCredentials(serviceId) {
-    const service = AppState.services.find(item => item.id === serviceId);
-    if (!service || !service.credentials_available) return;
-
-    const requestId = ++this.serviceCredentialsRequestId;
-    this.serviceCredentialsModalData = { serviceId, loading: true };
-    this.renderServiceCredentialsModal();
-    UI.openModal("serviceCredentialsModal");
-
-    try {
-      const result = await API.getServiceCredentials(serviceId);
-      if (requestId !== this.serviceCredentialsRequestId) return;
-      this.serviceCredentialsModalData = { serviceId, credentials: result.credentials || {} };
-      this.renderServiceCredentialsModal();
-    } catch (error) {
-      if (requestId !== this.serviceCredentialsRequestId) return;
-      this.serviceCredentialsModalData = { serviceId, error: error.message || String(error) };
-      this.renderServiceCredentialsModal();
-    }
-  },
-  renderServiceCredentialsModal() {
-    const data = this.serviceCredentialsModalData;
-    if (!data) return;
-    const title = document.getElementById("serviceCredentialsTitle");
-    const body = document.getElementById("serviceCredentialsBody");
-    const service = AppState.services.find(item => item.id === data.serviceId);
-    const serviceName = service ? service.name || service.id : data.serviceId;
-    if (title) title.textContent = t("services_credentials_title") + " " + String.fromCharCode(0x2014) + " " + serviceName;
-    if (!body) return;
-
-    if (data.loading) {
-      body.innerHTML = '<div class="flex items-center gap-2 text-sm text-slate-500 py-4"><i class="fa-solid fa-circle-notch fa-spin text-brand-600"></i><span>' + t("services_credentials_loading") + '</span></div>';
-      return;
-    }
-    if (data.error) {
-      body.innerHTML = '<div class="text-sm text-rose-700 p-3 rounded-xl bg-rose-50 border border-rose-100">' +
-        t("services_credentials_error", { msg: UI.escape(data.error) }) + '</div>';
-      return;
-    }
-
-    const credentials = data.credentials || {};
-    const labels = {
-      url: "services_credential_url",
-      username: "services_credential_username",
-      user: "services_credential_username",
-      password: "services_credential_password",
-      host: "services_credential_host",
-      port: "services_credential_port",
-      workspace: "services_credential_workspace"
-    };
-    const fields = Object.entries(credentials);
-    if (!fields.length) {
-      body.innerHTML = '<div class="text-sm text-slate-500 py-2">' + t("services_credentials_missing") + '</div>';
-      return;
-    }
-
-    body.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
-      fields.map(([key, value]) => {
-        const label = labels[key.toLowerCase()]
-          ? t(labels[key.toLowerCase()])
-          : key.replace(/[_-]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
-        return '<div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
-          '<div class="text-[11px] font-semibold text-slate-500 mb-1">' + UI.escape(label) + '</div>' +
-          '<div class="text-sm font-mono text-slate-800 break-all select-all cursor-text">' + UI.escape(String(value)) + '</div></div>';
-      }).join("") +
-      '</div>';
-  },
-
-  closeServiceCredentialsModal() {
-    UI.closeModal("serviceCredentialsModal");
-  },
-
-  async runServiceAction(serviceId, action) {
-    const service = AppState.services.find(item => item.id === serviceId);
-    if (!service) return;
-    const serviceName = service.name || service.id;
-    if (action === "uninstall" && !(await UI.confirm({
-      title: t("services_uninstall_title"),
-      message: t("services_uninstall_confirm", { name: serviceName }),
-      confirmText: t("services_action_uninstall"),
-      confirmIcon: "fa-trash-can"
-    }))) return;
-
-    AppState.serviceTasks[serviceId] = { service_id: serviceId, action, status: "running" };
-    this.renderFiles();
-    try {
-      const task = await API.runServiceAction(serviceId, action);
-      AppState.serviceTasks[serviceId] = task;
-      this.renderFiles();
-      await this.waitForServiceTask(task.id);
-    } catch (error) {
-      delete AppState.serviceTasks[serviceId];
-      this.renderFiles();
-      UI.toast(error.message || String(error), "error");
-    }
-  },
-
-  async waitForServiceTask(taskId) {
-    while (true) {
-      await new Promise(resolve => setTimeout(resolve, 1200));
-      const task = await API.getServiceTask(taskId);
-      AppState.serviceTasks[task.service_id] = task;
-      this.renderFiles();
-      if (task.status === "running") continue;
-
-      await this.loadDirectory(AppState.servicesPath || "", false, "services");
-      const actionName = t("services_action_" + task.action).toLowerCase();
-      if (task.status === "completed") {
-        UI.toast(t("services_action_complete", { action: actionName }), "success");
-      } else {
-        UI.toast(t("services_action_failed", { code: Number(task.return_code || 1) }), "error");
-      }
-      return;
-    }
-  },
-
   async openPortsPage() {
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
@@ -2022,7 +1832,6 @@ const App = {
       portsPage.style.display = "flex";
     }
     this.setActiveNavigation("navPorts");
-    AppState.isServicesMode = false;
     await this.refreshPortsPage(false);
   },
 
@@ -2443,7 +2252,6 @@ const App = {
       id: "terminal-" + number,
       title: "Terminal " + number,
       cwd: cwd || "",
-      fileScope: AppState.isServicesMode ? "services" : "storage",
       status: "connecting",
       instance: null,
       fitAddon: null,
@@ -2580,7 +2388,6 @@ const App = {
     if (tab.socket && tab.socket.readyState <= WebSocket.OPEN) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const terminalParams = new URLSearchParams({ cwd: tab.cwd || "" });
-    if (tab.fileScope === "services") terminalParams.set("scope", "services");
     const url = protocol + "//" + window.location.host + "/api/system/terminal/ws?" + terminalParams.toString();
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";

@@ -163,10 +163,9 @@ const Uploader = {
       if (progressText) progressText.textContent = "0%";
       if (fileListText) fileListText.textContent = t("upload_preparing", { count: files.length });
 
-      const fileScope = AppState.isServicesMode ? "services" : "storage";
       const relativePaths = files.map(relativePathFor);
       const initialCheck = await API.checkUploadConflicts(
-        AppState.currentPath, relativePaths, fileScope
+        AppState.currentPath, relativePaths
       );
       if (initialCheck.conflicts && initialCheck.conflicts.length) {
         const confirmed = await chooseConflicts(
@@ -218,8 +217,7 @@ const Uploader = {
 
           const latest = await API.checkUploadConflicts(
             AppState.currentPath,
-            uploadFiles.map(relativePathFor),
-            fileScope
+            uploadFiles.map(relativePathFor)
           );
           const conflicts = [...new Set([
             ...(detail.paths || []),
@@ -273,7 +271,7 @@ const Uploader = {
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", API.withFileScope("/api/files/upload"), true);
+      xhr.open("POST", "/api/files/upload", true);
       xhr.upload.onprogress = event => {
         if (event.lengthComputable) {
           const percent = Math.round((event.loaded / event.total) * 100);
@@ -338,7 +336,7 @@ const Uploader = {
 
         const chunkResult = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open("POST", API.withFileScope("/api/files/upload/chunk"), true);
+          xhr.open("POST", "/api/files/upload/chunk", true);
           xhr.upload.onprogress = (event) => {
             if (event.lengthComputable && progressBar && progressText) {
               const inFlight = Math.min(blob.size, event.loaded);

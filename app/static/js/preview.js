@@ -8,7 +8,6 @@ const Previewer = {
   currentIndex: -1,
   currentItem: null,
   currentCategory: null,
-  fileScope: null,
   activeVideo: null,
   activeAudio: null,
   keydownHandler: null,
@@ -112,11 +111,11 @@ const Previewer = {
     if (nextIdx >= this.playlist.length) nextIdx = 0;
     const nextItem = this.playlist[nextIdx];
     if (nextItem) {
-      this.openPreview(nextItem, null, this.fileScope);
+      this.openPreview(nextItem);
     }
   },
 
-  async openPreview(itemOrPath, optionalName = null, fileScope = null) {
+  async openPreview(itemOrPath, optionalName = null) {
     if (window.App && typeof App.hideContextMenu === "function") {
       App.hideContextMenu();
     }
@@ -150,7 +149,6 @@ const Previewer = {
 
     this.currentItem = item;
     this.currentCategory = item.category;
-    this.fileScope = fileScope || (AppState.isServicesMode ? "services" : "storage");
 
     // Gallery playlist calculation: find files in current directory with matching category
     if (window.AppState && Array.isArray(AppState.files)) {
@@ -197,7 +195,7 @@ const Previewer = {
     this.activeVideo = null;
     this.activeAudio = null;
 
-    const rawUrl = API.withFileScope("/api/files/preview-raw?path=" + encodeURIComponent(item.path).replace(/'/g, "%27"), this.fileScope);
+    const rawUrl = "/api/files/preview-raw?path=" + encodeURIComponent(item.path).replace(/'/g, "%27");
     const category = item.category;
     const ext = (item.extension || "").toUpperCase();
 
@@ -222,7 +220,7 @@ const Previewer = {
     }
     if (downloadBtn) {
       downloadBtn.onclick = () => {
-        window.location.href = API.withFileScope("/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27"), this.fileScope);
+        window.location.href = "/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27");
       };
     }
 
@@ -290,15 +288,15 @@ const Previewer = {
       } else if (category === "pdf") {
         this.renderPdf(item, rawUrl, container);
       } else if (item.extension && item.extension.toLowerCase() === "ipynb") {
-        const data = await API.getFileContent(item.path, this.fileScope);
+        const data = await API.getFileContent(item.path);
         this.renderNotebook(data.content, container);
       } else if (category === "spreadsheet" || category === "csv" || ["xlsx", "xls", "csv", "tsv"].includes((item.extension || "").toLowerCase())) {
         await this.renderSpreadsheet(item, rawUrl, container);
       } else if (category === "markdown") {
-        const data = await API.getFileContent(item.path, this.fileScope);
+        const data = await API.getFileContent(item.path);
         this.renderMarkdown(data.content, container);
       } else if (category === "text" || category === "code") {
-        const data = await API.getFileContent(item.path, this.fileScope);
+        const data = await API.getFileContent(item.path);
         this.renderCode(item, data, container);
       } else {
         container.innerHTML = `
@@ -306,7 +304,7 @@ const Previewer = {
             <div style="font-size: 54px; margin-bottom: 16px;">${UI.getIcon(item)}</div>
             <h3 class="font-bold text-white text-base mb-1">${UI.escape(item.name)}</h3>
             <p style="color: #94a3b8; margin: 8px 0 20px;" class="text-xs">${t("preview_unsupported", { ext: (item.extension || "").toUpperCase() })}</p>
-            <button class="btn-primary" style="margin: 0 auto;" onclick="window.location.href='${API.withFileScope("/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27"), this.fileScope)}'">
+            <button class="btn-primary" style="margin: 0 auto;" onclick="window.location.href='${"/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27")}'">
               <i class="fa-solid fa-download"></i> ${t("preview_download_file")}
             </button>
           </div>`;
@@ -346,7 +344,7 @@ const Previewer = {
             <i class="fa-solid fa-rotate-right"></i>
           </button>
           <div class="img-toolbar-sep"></div>
-          <button class="img-capsule-btn" onclick="window.location.href='${API.withFileScope("/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27"), this.fileScope)}'" title="${t("download")}">
+          <button class="img-capsule-btn" onclick="window.location.href='${"/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27")}'" title="${t("download")}">
             <i class="fa-solid fa-download"></i>
           </button>
         </div>
@@ -918,7 +916,7 @@ const Previewer = {
               <i class="fa-solid fa-copy text-sky-400"></i>
               <span>${t("preview_copy_code")}</span>
             </button>
-            <button class="px-3 py-1 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 shadow-sm" onclick="Previewer.closePreview(); Editor.openFile('${UI.inlineJsString(item.path)}', '${this.fileScope}')">
+            <button class="px-3 py-1 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 shadow-sm" onclick="Previewer.closePreview(); Editor.openFile('${UI.inlineJsString(item.path)}')">
               <i class="fa-solid fa-pen-to-square"></i>
               <span>${t("preview_edit_code")}</span>
             </button>
@@ -1061,7 +1059,7 @@ const Previewer = {
           <p style="color: #fda4af; margin-bottom: 20px; font-family: monospace; font-size: 12px; word-break: break-all;">
             ${UI.escape(err.message)}
           </p>
-          <button class="btn-primary" style="margin: 0 auto;" onclick="window.location.href='${API.withFileScope("/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27"), this.fileScope)}'">
+          <button class="btn-primary" style="margin: 0 auto;" onclick="window.location.href='${"/api/files/download?path=" + encodeURIComponent(item.path).replace(/'/g, "%27")}'">
             <i class="fa-solid fa-download"></i> ${t("preview_download_file")}
           </button>
         </div>
@@ -1696,12 +1694,12 @@ const Previewer = {
         } catch (_) {
           b64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
         }
-        await API.saveBinaryFile(state.item.path, b64, this.fileScope);
+        await API.saveBinaryFile(state.item.path, b64);
       } else {
         const delimiter = isTsv ? "\t" : ",";
         const rows = state.sheets[state.activeSheet] || [];
         const csvContent = this.rowsToCSV(rows, delimiter, state.hasBom);
-        await API.saveFileContent(state.item.path, csvContent, this.fileScope);
+        await API.saveFileContent(state.item.path, csvContent);
       }
 
       state.isDirty = false;

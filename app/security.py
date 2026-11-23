@@ -2,7 +2,6 @@ import ipaddress
 import secrets
 import threading
 import time
-from contextvars import ContextVar
 from collections import OrderedDict
 from pathlib import Path
 from fastapi import Request, HTTPException, status
@@ -16,19 +15,10 @@ _LOGIN_CLIENT_LIMIT = 4096
 _LOGIN_FAILURES = OrderedDict()
 _LOGIN_FAILURE_LOCK = threading.Lock()
 LOGIN_LOCKOUT_MESSAGE = "\u0110\u0103ng nh\u1eadp sai qu\xe1 nhi\u1ec1u l\u1ea7n. H\xe3y th\u1eed l\u1ea1i sau 15 ph\xfat."
-_ROOT_DIR_OVERRIDE: ContextVar[Path | None] = ContextVar("root_dir_override", default=None)
 
 
 def get_root_dir() -> Path:
-    return _ROOT_DIR_OVERRIDE.get() or settings.ROOT_DIR
-
-
-def set_root_dir_override(root_dir: Path):
-    return _ROOT_DIR_OVERRIDE.set(Path(root_dir).resolve())
-
-
-def reset_root_dir_override(token) -> None:
-    _ROOT_DIR_OVERRIDE.reset(token)
+    return settings.ROOT_DIR
 
 
 def _login_client_key(request: Request) -> str:

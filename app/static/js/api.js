@@ -3,31 +3,14 @@
    ============================================================ */
 
 const API = {
-  withFileScope(endpoint, fileScope = null) {
-    if (!endpoint.startsWith("/api/files")) {
-      return endpoint;
-    }
-    const url = new URL(endpoint, window.location.origin);
-    const useServices = fileScope
-      ? fileScope === "services"
-      : Boolean(document.getElementById("navServices")?.classList.contains("active"));
-    if (useServices) url.searchParams.set("scope", "services");
-    else url.searchParams.delete("scope");
-    return url.pathname + url.search;
-  },
-
   async request(endpoint, options = {}) {
-    const fileScope = options.fileScope || null;
-    const requestOptions = { ...options };
-    delete requestOptions.fileScope;
-    endpoint = this.withFileScope(endpoint, fileScope);
     const defaultHeaders = {};
     if (options.body && !(options.body instanceof FormData)) {
       defaultHeaders["Content-Type"] = "application/json";
     }
 
     const config = {
-      ...requestOptions,
+      ...options,
       headers: {
         ...defaultHeaders,
         ...(options.headers || {})
@@ -83,8 +66,8 @@ const API = {
     return this.request(`/api/files?${params.toString()}`);
   },
 
-  getFileContent(path, fileScope = null) {
-    return this.request(`/api/files/content?path=${encodeURIComponent(path)}`, { fileScope });
+  getFileContent(path) {
+    return this.request("/api/files/content?path=" + encodeURIComponent(path));
   },
 
   getFileProperties(path) {
@@ -92,27 +75,24 @@ const API = {
     return this.request(`/api/files/properties?${params.toString()}`);
   },
 
-  saveFileContent(path, content, fileScope = null) {
+  saveFileContent(path, content) {
     return this.request("/api/files/content", {
       method: "POST",
-      body: JSON.stringify({ path, content }),
-      fileScope
+      body: JSON.stringify({ path, content })
     });
   },
 
-  saveBinaryFile(path, content_b64, fileScope = null) {
+  saveBinaryFile(path, content_b64) {
     return this.request("/api/files/save-binary", {
       method: "POST",
-      body: JSON.stringify({ path, content_b64 }),
-      fileScope
+      body: JSON.stringify({ path, content_b64 })
     });
   },
 
-  checkUploadConflicts(target_path, relative_paths, fileScope = null) {
+  checkUploadConflicts(target_path, relative_paths) {
     return this.request("/api/files/upload/check", {
       method: "POST",
-      body: JSON.stringify({ target_path, relative_paths }),
-      fileScope
+      body: JSON.stringify({ target_path, relative_paths })
     });
   },
 
@@ -144,19 +124,17 @@ const API = {
     });
   },
 
-  copyItem(source_path, target_folder, fileScope = null) {
+  copyItem(source_path, target_folder) {
     return this.request("/api/files/copy", {
       method: "POST",
-      body: JSON.stringify({ source_path, target_folder }),
-      fileScope
+      body: JSON.stringify({ source_path, target_folder })
     });
   },
 
-  moveItem(source_path, target_folder, fileScope = null) {
+  moveItem(source_path, target_folder) {
     return this.request("/api/files/move", {
       method: "POST",
-      body: JSON.stringify({ source_path, target_folder }),
-      fileScope
+      body: JSON.stringify({ source_path, target_folder })
     });
   },
 
@@ -181,8 +159,8 @@ const API = {
     });
   },
 
-  async downloadSelectedZip(items, fileScope = null) {
-    const response = await fetch(this.withFileScope("/api/files/download-selected-zip", fileScope), {
+  async downloadSelectedZip(items) {
+    const response = await fetch("/api/files/download-selected-zip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items })
@@ -209,22 +187,6 @@ const API = {
 
   getListeningPorts() {
     return this.request("/api/system/ports");
-  },
-
-  getServices() {
-    return this.request("/api/services");
-  },
-
-  runServiceAction(serviceId, action) {
-    return this.request("/api/services/" + encodeURIComponent(serviceId) + "/" + encodeURIComponent(action), { method: "POST" });
-  },
-
-  getServiceCredentials(serviceId) {
-    return this.request("/api/services/" + encodeURIComponent(serviceId) + "/credentials");
-  },
-
-  getServiceTask(taskId) {
-    return this.request("/api/services/tasks/" + encodeURIComponent(taskId));
   },
 
   startPortTunnel(port) {

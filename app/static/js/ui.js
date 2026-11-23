@@ -151,9 +151,6 @@ const UI = {
       window.Editor.close();
       return;
     }
-    if (modalId === "serviceCredentialsModal" && typeof App !== "undefined" && typeof App.clearServiceCredentialsModal === "function") {
-      App.clearServiceCredentialsModal();
-    }
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.remove("show");
@@ -178,9 +175,6 @@ const UI = {
     if (window.Editor && window.Editor.isDirty) {
       window.Editor.close();
       return;
-    }
-    if (typeof App !== "undefined" && typeof App.clearServiceCredentialsModal === "function") {
-      App.clearServiceCredentialsModal();
     }
     if (window.Previewer && typeof window.Previewer.closePreview === "function") {
       window.Previewer.closePreview();

@@ -37,13 +37,6 @@ The default managed root is `/` on Kaggle and `./workspace` elsewhere. Override 
 - Save with `Ctrl+S` or `Cmd+S`, change the font size, toggle line wrapping, and use fullscreen mode.
 - The editor displays line count, file size, and cursor position, and warns before discarding unsaved changes.
 
-### Services
-
-- Each immediate subdirectory of services/ is discovered as a service.
-- The service card runs install.sh, start.sh, stop.sh, and uninstall.sh when those files exist.
-- Service details are read from services/<service>/tmp/info.txt, with one key:value entry per line. The parser splits at the first colon, so URL values keep their http:// prefix.
-- Optional name and description entries label the card. The information button shows every entry from info.txt.
-
 ### Ports Manager and Cloudflare Tunnel
 
 - Scan local TCP listening ports that can be reached through `127.0.0.1`; display the port, address, process name when available, and tunnel state.

@@ -4,7 +4,6 @@
 
 const Editor = {
   currentFilePath: null,
-  currentFileScope: null,
   isDirty: false,
   aceInstance: null,
   fontSize: 14,
@@ -145,17 +144,15 @@ const Editor = {
     tabIcon.className = icons[ext.toLowerCase()] || "fa-solid fa-file-code text-brand-400";
   },
 
-  async openFile(path, fileScope = null) {
+  async openFile(path) {
     if (window.App && typeof App.hideContextMenu === "function") {
       App.hideContextMenu();
     }
     try {
       UI.toast(t("editor_loading_toast"), "info", 1500);
-      const scope = fileScope || (AppState.isServicesMode ? "services" : "storage");
-      const data = await API.getFileContent(path, scope);
+      const data = await API.getFileContent(path);
 
       this.currentFilePath = data.path;
-      this.currentFileScope = scope;
 
       const titleEl = document.getElementById("editorFileName");
       if (titleEl) titleEl.textContent = data.name;
@@ -301,12 +298,10 @@ const Editor = {
     }
 
     try {
-      await API.saveFileContent(this.currentFilePath, content, this.currentFileScope);
+      await API.saveFileContent(this.currentFilePath, content);
       this.setDirty(false);
       UI.toast(t("editor_saved_toast"), "success");
-      if ((this.currentFileScope === "services") === AppState.isServicesMode) {
-        App.loadDirectory(AppState.currentPath, false, this.currentFileScope);
-      }
+      App.loadDirectory(AppState.currentPath, false);
     } catch (err) {
       UI.toast(t("editor_save_error", { msg: err.message }), "error");
     } finally {
@@ -366,7 +361,6 @@ const Editor = {
 
   doClose() {
     this.currentFilePath = null;
-    this.currentFileScope = null;
     this.isDirty = false;
     const modal = document.getElementById("editorModal");
     if (modal) modal.classList.remove("show");
