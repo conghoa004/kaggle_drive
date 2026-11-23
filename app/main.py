@@ -59,6 +59,7 @@ class RequestBodyLimitMiddleware:
             "/api/auth/login": 16 * 1024,
             "/api/files/upload": settings.MAX_UPLOAD_BYTES + 16 * 1024 * 1024,
             "/api/files/upload/check": 16 * 1024 * 1024,
+            "/api/files/upload/cancel": 8 * 1024 * 1024,
             "/api/files/upload/chunk": settings.UPLOAD_CHUNK_BYTES + 5 * 1024 * 1024,
             "/api/files/extract": 8 * 1024 * 1024,
             "/api/files/content": settings.MAX_TEXT_PREVIEW_SIZE * 6 + 1024 * 1024,

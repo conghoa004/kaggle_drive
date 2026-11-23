@@ -83,6 +83,35 @@ UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS = 60 * 60
 _UPLOAD_CHUNK_DIRECTORIES: Dict[Path, float] = {}
 _UPLOAD_CHUNK_DIRECTORIES_LOCK = threading.Lock()
 _UPLOAD_CHUNK_DIRECTORY_REGISTRY_LOADED = False
+_CANCELLED_UPLOAD_CHUNK_IDS: Dict[str, float] = {}
+_CANCELLED_UPLOAD_CHUNK_IDS_LOCK = threading.Lock()
+
+
+def _is_upload_chunk_cancelled(upload_id: str) -> bool:
+    now = time.time()
+    with _CANCELLED_UPLOAD_CHUNK_IDS_LOCK:
+        for cancelled_id, expires_at in list(_CANCELLED_UPLOAD_CHUNK_IDS.items()):
+            if expires_at <= now:
+                _CANCELLED_UPLOAD_CHUNK_IDS.pop(cancelled_id, None)
+        return upload_id in _CANCELLED_UPLOAD_CHUNK_IDS
+
+
+def _mark_upload_chunk_cancelled(upload_id: str) -> None:
+    now = time.time()
+    with _CANCELLED_UPLOAD_CHUNK_IDS_LOCK:
+        for cancelled_id, expires_at in list(_CANCELLED_UPLOAD_CHUNK_IDS.items()):
+            if expires_at <= now:
+                _CANCELLED_UPLOAD_CHUNK_IDS.pop(cancelled_id, None)
+        if (
+            upload_id not in _CANCELLED_UPLOAD_CHUNK_IDS
+            and len(_CANCELLED_UPLOAD_CHUNK_IDS) >= 4096
+        ):
+            oldest_id = min(
+                _CANCELLED_UPLOAD_CHUNK_IDS,
+                key=_CANCELLED_UPLOAD_CHUNK_IDS.get,
+            )
+            _CANCELLED_UPLOAD_CHUNK_IDS.pop(oldest_id, None)
+        _CANCELLED_UPLOAD_CHUNK_IDS[upload_id] = now + UPLOAD_CHUNK_TTL_SECONDS
 
 
 def _upload_chunk_directory_registry_path() -> Path:
@@ -311,6 +340,30 @@ class FileService:
     @staticmethod
     def register_upload_chunk_directory(directory: Path) -> None:
         _register_upload_chunk_directory(directory)
+
+    @staticmethod
+    def is_upload_chunk_cancelled(upload_id: str) -> bool:
+        return _is_upload_chunk_cancelled(upload_id)
+
+    @staticmethod
+    def cancel_upload_chunks(target_folder_rel: str, uploads: List[Dict[str, str]]) -> int:
+        """Mark in-flight chunk IDs cancelled and remove their partial files."""
+        base_folder = get_safe_path(target_folder_rel, must_exist=True)
+        if not base_folder.is_dir():
+            raise HTTPException(status_code=400, detail="Upload destination must be a directory.")
+
+        removed = 0
+        for upload in uploads:
+            destination = _resolve_upload_destination(
+                base_folder, upload.get("relative_path", "")
+            )
+            upload_id = upload.get("upload_id", "")
+            _mark_upload_chunk_cancelled(upload_id)
+            chunk_path = destination.with_name(f".upload-{upload_id}.part")
+            existed = chunk_path.exists() or chunk_path.is_symlink()
+            chunk_path.unlink(missing_ok=True)
+            removed += int(existed)
+        return removed
 
     @staticmethod
     def list_directory(rel_path: str = "", show_hidden: bool = False) -> Dict[str, Any]:
@@ -728,9 +781,9 @@ class FileService:
                 )
 
         dest_item = dest_folder / source.name
-        if dest_item.exists():
+        if dest_item.exists() or dest_item.is_symlink():
             counter = 1
-            while dest_item.exists():
+            while dest_item.exists() or dest_item.is_symlink():
                 if source.is_file():
                     name = f"{source.stem}_copy{counter}{source.suffix}"
                 else:
@@ -742,7 +795,7 @@ class FileService:
             check_cancelled(cancel_event)
             source_file = Path(source_path)
             destination_file = Path(destination_path)
-            with source_file.open("rb") as source_stream, destination_file.open("wb") as destination_stream:
+            with source_file.open("rb") as source_stream, destination_file.open("xb") as destination_stream:
                 while True:
                     check_cancelled(cancel_event)
                     chunk = source_stream.read(settings.CHUNK_SIZE)
@@ -771,9 +824,9 @@ class FileService:
                 dest_item.unlink(missing_ok=True)
             raise
         except Exception as exc:
-            if dest_item.is_dir():
+            if dest_item.is_dir() and not dest_item.is_symlink():
                 shutil.rmtree(dest_item, ignore_errors=True)
-            elif dest_item.exists():
+            elif dest_item.exists() or dest_item.is_symlink():
                 dest_item.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail=f"Could not copy item: {exc}")
 
@@ -814,7 +867,7 @@ class FileService:
             check_cancelled(cancel_event)
             source_file = Path(source_path)
             destination_file = Path(destination_path)
-            with source_file.open("rb") as source_stream, destination_file.open("wb") as destination_stream:
+            with source_file.open("rb") as source_stream, destination_file.open("xb") as destination_stream:
                 while True:
                     check_cancelled(cancel_event)
                     chunk = source_stream.read(settings.CHUNK_SIZE)
@@ -901,8 +954,7 @@ class FileService:
                         status_code=400,
                         detail="Only regular files and directories can be archived.",
                     )
-            if not entries:
-                raise HTTPException(status_code=400, detail="No visible files were available to archive.")
+            check_cancelled(cancel_event)
             archive.seek(0)
             return archive
         except Exception as exc:

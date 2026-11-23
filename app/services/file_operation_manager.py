@@ -141,11 +141,19 @@ class FileOperationManager:
         else:
             with self._lock:
                 if item.operation in {"download_selected_zip", "download_folder_zip"}:
-                    item.archive_file = result
-                    item.result = {"status": "ready"}
+                    if item.cancel_event.is_set():
+                        try:
+                            result.close()
+                        except Exception:
+                            pass
+                        item.status = "cancelled"
+                    else:
+                        item.archive_file = result
+                        item.result = {"status": "ready"}
+                        item.status = "completed"
                 else:
                     item.result = result
-                item.status = "completed"
+                    item.status = "completed"
                 item.updated_at = time.monotonic()
 
     @staticmethod

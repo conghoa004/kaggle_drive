@@ -750,7 +750,6 @@ const App = {
       taskId,
       operationId: null,
       completedOperationId: null,
-      downloadController: null,
       cancelRequested: false,
       cancelSent: false,
       awaitingConfirmation: false
@@ -766,9 +765,6 @@ const App = {
   async cancelFileOperationTask(control) {
     control.cancelRequested = true;
     if (control.awaitingConfirmation) UI.resolveConfirmation(false);
-    if (control.downloadController) {
-      control.downloadController.abort();
-    }
     const operationId = control.operationId || control.completedOperationId;
     if (operationId && !control.cancelSent) {
       control.cancelSent = true;
@@ -1392,11 +1388,8 @@ const App = {
         t("background_operation_running")
       );
       if (control.cancelRequested) throw this.fileOperationCancelledError();
-      const downloadController = new AbortController();
-      control.downloadController = downloadController;
       await API.downloadFileOperationZip(
         control.completedOperationId,
-        downloadController.signal,
         filename
       );
     } catch (error) {
@@ -1406,7 +1399,6 @@ const App = {
         UI.toast(`${t("error")}: ${error.message}`, "error");
       }
     } finally {
-      control.downloadController = null;
       UI.finishBackgroundTask(taskId);
     }
   },
@@ -1543,11 +1535,8 @@ const App = {
         t("background_operation_running")
       );
       if (control.cancelRequested) throw this.fileOperationCancelledError();
-      const downloadController = new AbortController();
-      control.downloadController = downloadController;
       await API.downloadFileOperationZip(
-        control.completedOperationId,
-        downloadController.signal
+        control.completedOperationId
       );
       UI.toast(t("compress_multi_success"), "success");
     } catch (err) {
@@ -1557,7 +1546,6 @@ const App = {
         UI.toast(`${t("error")}: ${err.message}`, "error");
       }
     } finally {
-      control.downloadController = null;
       UI.finishBackgroundTask(taskId);
     }
   },

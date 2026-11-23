@@ -7,6 +7,7 @@ const Uploader = {
   cancelRequested: false,
   activeXhr: null,
   awaitingOverwriteConfirmation: false,
+  activeChunkUploads: [],
 
   cancellationError() {
     const error = new Error(t("upload_cancelled"));
@@ -31,6 +32,14 @@ const Uploader = {
 
     if (this.awaitingOverwriteConfirmation) UI.resolveConfirmation(false);
     if (this.activeXhr) this.activeXhr.abort();
+    const pendingUploads = this.activeChunkUploads.slice();
+    if (pendingUploads.length) {
+      const targetPath = pendingUploads[0].target_path;
+      API.cancelUploadChunks(
+        targetPath,
+        pendingUploads.map(({ upload_id, relative_path }) => ({ upload_id, relative_path }))
+      ).catch(() => {});
+    }
   },
 
   showProgress() {
@@ -169,6 +178,7 @@ const Uploader = {
     this.cancelRequested = false;
     this.activeXhr = null;
     this.awaitingOverwriteConfirmation = false;
+    this.activeChunkUploads = [];
     this.showProgress();
     const targetPath = String(AppState.currentPath || "");
     const refreshTargetView = () => {
@@ -339,6 +349,7 @@ const Uploader = {
       this.isUploading = false;
       this.activeXhr = null;
       this.awaitingOverwriteConfirmation = false;
+      this.activeChunkUploads = [];
       this.hideProgress();
     }
   },
@@ -402,6 +413,7 @@ const Uploader = {
     let completedBytes = 0;
 
     for (const file of files) {
+      this.throwIfCancelled();
       const uploadId = (window.crypto && typeof window.crypto.randomUUID === "function")
         ? window.crypto.randomUUID()
         : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
@@ -410,74 +422,93 @@ const Uploader = {
           });
       const chunkCount = Math.max(1, Math.ceil(file.size / chunkSize));
       let offset = 0;
+      const uploadRecord = {
+        upload_id: uploadId,
+        relative_path: file.webkitRelativePath || file.name,
+        target_path: targetPath
+      };
+      this.activeChunkUploads.push(uploadRecord);
 
-      for (let index = 0; index < chunkCount; index++) {
-        const end = Math.min(offset + chunkSize, file.size);
-        const blob = file.slice(offset, end);
-        const formData = new FormData();
-        formData.append("target_path", targetPath);
-        formData.append("relative_path", file.webkitRelativePath || file.name);
-        formData.append("upload_id", uploadId);
-        formData.append("offset", String(offset));
-        formData.append("total_size", String(file.size));
-        formData.append("batch_size", String(totalBytes));
-        const destination = [targetPath, file.webkitRelativePath || file.name]
-          .filter(Boolean)
-          .join("/")
-          .replace(/\\/g, "/")
-          .split("/")
-          .filter(part => part && part !== ".")
-          .join("/");
-        formData.append("overwrite", String(overwritePaths.has(destination)));
-        overwritePaths.forEach(path => formData.append("overwrite_paths", path));
-        skipPaths.forEach(path => formData.append("skip_paths", path));
-        formData.append("chunk", blob, "chunk.bin");
+      try {
+        for (let index = 0; index < chunkCount; index++) {
+          this.throwIfCancelled();
+          const end = Math.min(offset + chunkSize, file.size);
+          const blob = file.slice(offset, end);
+          const formData = new FormData();
+          formData.append("target_path", targetPath);
+          formData.append("relative_path", uploadRecord.relative_path);
+          formData.append("upload_id", uploadId);
+          formData.append("offset", String(offset));
+          formData.append("total_size", String(file.size));
+          formData.append("batch_size", String(totalBytes));
+          const destination = [targetPath, uploadRecord.relative_path]
+            .filter(Boolean)
+            .join("/")
+            .replace(/\\/g, "/")
+            .split("/")
+            .filter(part => part && part !== ".")
+            .join("/");
+          formData.append("overwrite", String(overwritePaths.has(destination)));
+          overwritePaths.forEach(path => formData.append("overwrite_paths", path));
+          skipPaths.forEach(path => formData.append("skip_paths", path));
+          formData.append("chunk", blob, "chunk.bin");
 
-        const chunkResult = await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          this.activeXhr = xhr;
-          const clearActiveXhr = () => {
-            if (this.activeXhr === xhr) this.activeXhr = null;
-          };
-          xhr.open("POST", "/api/files/upload/chunk", true);
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable && progressBar && progressText) {
-              const inFlight = Math.min(blob.size, event.loaded);
-              const percent = Math.round(((completedBytes + inFlight) / totalBytes) * 100);
-              progressBar.style.width = percent + "%";
-              progressText.textContent = percent + "% (" +
-                UI.formatSize(completedBytes + inFlight) + " / " + UI.formatSize(totalBytes) + ")";
-            }
-          };
-          xhr.onload = () => {
-            clearActiveXhr();
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                resolve(JSON.parse(xhr.responseText || "{}"));
-              } catch (_) {
-                resolve({});
+          const chunkResult = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            this.activeXhr = xhr;
+            const clearActiveXhr = () => {
+              if (this.activeXhr === xhr) this.activeXhr = null;
+            };
+            xhr.open("POST", "/api/files/upload/chunk", true);
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable && progressBar && progressText) {
+                const inFlight = Math.min(blob.size, event.loaded);
+                const percent = Math.round(((completedBytes + inFlight) / totalBytes) * 100);
+                progressBar.style.width = percent + "%";
+                progressText.textContent = percent + "% (" +
+                  UI.formatSize(completedBytes + inFlight) + " / " + UI.formatSize(totalBytes) + ")";
               }
-              return;
-            }
-            reject(this.xhrError(xhr, "Upload failed (HTTP " + xhr.status + ")."));
-          };
-          xhr.onerror = () => {
-            clearActiveXhr();
-            reject(new Error(t("upload_error")));
-          };
-          xhr.onabort = () => {
-            clearActiveXhr();
-            reject(this.cancellationError());
-          };
-          xhr.send(formData);
-        });
+            };
+            xhr.onload = () => {
+              clearActiveXhr();
+              if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                  resolve(JSON.parse(xhr.responseText || "{}"));
+                } catch (_) {
+                  resolve({});
+                }
+                return;
+              }
+              reject(this.xhrError(xhr, "Upload failed (HTTP " + xhr.status + ")."));
+            };
+            xhr.onerror = () => {
+              clearActiveXhr();
+              reject(new Error(t("upload_error")));
+            };
+            xhr.onabort = () => {
+              clearActiveXhr();
+              reject(this.cancellationError());
+            };
+            xhr.send(formData);
+          });
 
-        if (chunkResult.status === "skipped") {
-          completedBytes += file.size - offset;
-          break;
+          if (chunkResult.status === "skipped") {
+            completedBytes += file.size - offset;
+            break;
+          }
+          completedBytes += blob.size;
+          offset = end;
         }
-        completedBytes += blob.size;
-        offset = end;
+      } catch (error) {
+        await API.cancelUploadChunks(targetPath, [{
+          upload_id: uploadId,
+          relative_path: uploadRecord.relative_path
+        }]).catch(() => {});
+        throw error;
+      } finally {
+        this.activeChunkUploads = this.activeChunkUploads.filter(
+          upload => upload.upload_id !== uploadId
+        );
       }
     }
   }

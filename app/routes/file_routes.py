@@ -73,6 +73,16 @@ class UploadCheckRequest(BaseModel):
     relative_paths: List[str] = Field(..., min_length=1, max_length=1000)
 
 
+class UploadChunkCancellation(BaseModel):
+    upload_id: str = Field(..., max_length=36)
+    relative_path: str = Field(..., max_length=4096)
+
+
+class UploadCancelRequest(BaseModel):
+    target_path: str = ""
+    uploads: List[UploadChunkCancellation] = Field(..., min_length=1, max_length=1000)
+
+
 class ExtractRequest(BaseModel):
     path: str
     target_folder: Optional[str] = None
@@ -209,6 +219,24 @@ def check_upload_conflicts(request: Request, payload: UploadCheckRequest):
     }
 
 
+@router.post("/upload/cancel")
+def cancel_upload_chunks(request: Request, payload: UploadCancelRequest):
+    """Cancel active chunk uploads and immediately remove their partial files."""
+    require_auth(request)
+    from uuid import UUID
+
+    uploads = []
+    for item in payload.uploads:
+        try:
+            UUID(item.upload_id)
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="Invalid upload ID.")
+        uploads.append(item.dict())
+
+    removed = FileService.cancel_upload_chunks(payload.target_path, uploads)
+    return {"status": "cancelled", "removed_chunks": removed}
+
+
 @router.post("/upload")
 def upload_files(
     request: Request,
@@ -306,6 +334,8 @@ def upload_file_chunk(
         UUID(upload_id)
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid upload ID.")
+    if FileService.is_upload_chunk_cancelled(upload_id):
+        raise HTTPException(status_code=410, detail="This upload was cancelled.")
 
     if total_size < 0 or total_size > settings.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Upload exceeds the configured size limit.")
@@ -361,21 +391,38 @@ def upload_file_chunk(
         data = chunk.file.read(settings.UPLOAD_CHUNK_BYTES + 1)
         if len(data) > settings.UPLOAD_CHUNK_BYTES or offset + len(data) > total_size:
             raise HTTPException(status_code=413, detail="Upload chunk exceeds the configured limit.")
+        if FileService.is_upload_chunk_cancelled(upload_id):
+            chunk_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=410, detail="This upload was cancelled.")
 
         if offset == 0:
-            if chunk_path.is_dir():
-                raise HTTPException(status_code=400, detail="Invalid upload staging path.")
+            if chunk_path.exists() or chunk_path.is_symlink():
+                raise HTTPException(status_code=409, detail="Upload staging file already exists.")
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             mode = "wb"
         else:
-            if not chunk_path.is_file() or chunk_path.stat().st_size != offset:
+            if (
+                chunk_path.is_symlink()
+                or not chunk_path.is_file()
+                or chunk_path.stat().st_size != offset
+            ):
                 raise HTTPException(status_code=409, detail="Upload chunk is out of sequence.")
+            flags = os.O_WRONLY | os.O_APPEND
             mode = "ab"
 
-        with chunk_path.open(mode) as output:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            file_descriptor = os.open(chunk_path, flags, 0o600)
+        except FileExistsError:
+            raise HTTPException(status_code=409, detail="Upload staging file already exists.")
+        with os.fdopen(file_descriptor, mode) as output:
             output.write(data)
         FileService.register_upload_chunk_directory(dest_path.parent)
 
         received = offset + len(data)
+        if FileService.is_upload_chunk_cancelled(upload_id):
+            chunk_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=410, detail="This upload was cancelled.")
         if received == total_size:
             if overwrite_this:
                 chunk_path.replace(dest_path)
@@ -464,16 +511,27 @@ def cancel_file_operation(request: Request, operation_id: str):
 
 
 @router.get("/operations/{operation_id}/download")
-def download_file_operation_archive(request: Request, operation_id: str):
+def download_file_operation_archive(
+    request: Request,
+    operation_id: str,
+    filename: str = Query("selected_items.zip", max_length=255),
+):
     """Stream a ZIP produced by a selected-items background operation."""
     require_auth(request)
     archive_file = file_operation_manager.take_archive(operation_id)
     if archive_file is None:
         raise HTTPException(status_code=409, detail="The archive is not available for download.")
+    safe_filename = filename.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not safe_filename or safe_filename in {".", ".."}:
+        safe_filename = "selected_items.zip"
+    if not safe_filename.lower().endswith(".zip"):
+        safe_filename += ".zip"
     return StreamingResponse(
         _archive_chunks(archive_file),
         media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="selected_items.zip"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{quote(safe_filename, safe="")}"'
+        },
         background=BackgroundTask(archive_file.close),
     )
 
