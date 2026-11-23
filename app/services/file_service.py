@@ -661,22 +661,84 @@ class FileService:
                     status_code=413, detail="Archive expands beyond the configured size limit."
                 )
 
+        def validate_extraction_targets(checked_members) -> None:
+            planned = {}
+            for _member, member_path, is_directory in checked_members:
+                relative = member_path.relative_to(dest_root)
+                key = os.path.normcase(os.path.normpath(str(member_path)))
+
+                if key in planned:
+                    if planned[key] and is_directory:
+                        continue
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Archive paths conflict with existing or duplicate destination paths.",
+                    )
+
+                parts = relative.parts
+                for length in range(1, len(parts)):
+                    ancestor = dest_root.joinpath(*parts[:length])
+                    ancestor_key = os.path.normcase(os.path.normpath(str(ancestor)))
+                    if planned.get(ancestor_key) is False:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Archive paths conflict with existing or duplicate destination paths.",
+                        )
+                    if ancestor.exists() and not ancestor.is_dir():
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Archive path conflicts with an existing file.",
+                        )
+
+                if not is_directory:
+                    prefix = key + os.sep
+                    if any(existing.startswith(prefix) for existing in planned):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Archive paths conflict with existing or duplicate destination paths.",
+                        )
+                    if member_path.exists():
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Extraction would overwrite an existing file.",
+                        )
+                elif member_path.exists() and not member_path.is_dir():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Archive directory conflicts with an existing file.",
+                    )
+
+                planned[key] = is_directory
+
         def copy_member(source, target: Path, expected_size: int) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             remaining = expected_size
-            with open(target, "wb") as output:
-                while remaining:
-                    chunk = source.read(min(settings.CHUNK_SIZE, remaining))
-                    if not chunk:
+            created = False
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            try:
+                descriptor = os.open(target, flags, 0o666)
+                created = True
+                with os.fdopen(descriptor, "wb") as output:
+                    while remaining:
+                        chunk = source.read(min(settings.CHUNK_SIZE, remaining))
+                        if not chunk:
+                            raise HTTPException(
+                                status_code=400, detail="Archive entry is shorter than declared."
+                            )
+                        output.write(chunk)
+                        remaining -= len(chunk)
+                    if source.read(1):
                         raise HTTPException(
-                            status_code=400, detail="Archive entry is shorter than declared."
+                            status_code=400, detail="Archive entry exceeds its declared size."
                         )
-                    output.write(chunk)
-                    remaining -= len(chunk)
-                if source.read(1):
-                    raise HTTPException(
-                        status_code=400, detail="Archive entry exceeds its declared size."
-                    )
+            except FileExistsError:
+                raise HTTPException(
+                    status_code=409, detail="Extraction would overwrite an existing file."
+                )
+            except Exception:
+                if created:
+                    target.unlink(missing_ok=True)
+                raise
 
         extracted_count = 0
         try:
@@ -705,6 +767,7 @@ class FileService:
                         checked_members.append(
                             (member, safe_member_path(member.filename), is_directory)
                         )
+                    validate_extraction_targets(checked_members)
 
                     for member, member_path, is_directory in checked_members:
                         if is_directory:
@@ -730,6 +793,7 @@ class FileService:
                         checked_members.append(
                             (member, safe_member_path(member.name), member.isdir())
                         )
+                    validate_extraction_targets(checked_members)
 
                     for member, member_path, is_directory in checked_members:
                         if is_directory:
@@ -772,6 +836,7 @@ class FileService:
                         checked_members.append(
                             (member, safe_member_path(member.filename), member.is_dir())
                         )
+                    validate_extraction_targets(checked_members)
 
                     for member, member_path, is_directory in checked_members:
                         if is_directory:
