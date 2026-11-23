@@ -91,13 +91,16 @@ def get_file_category(extension: str) -> str:
     return EXTENSION_CATEGORIES.get(extension.lower(), "generic")
 
 
-def _overwrite_required(paths: List[str]) -> HTTPException:
+MAX_EXTRACT_REVIEW_PATHS = 1000
+
+
+def _overwrite_required(paths: List[str], max_paths: int = 10) -> HTTPException:
     unique_paths = sorted(set(paths))
     return HTTPException(
         status_code=409,
         detail={
             "code": "overwrite_required",
-            "paths": unique_paths[:10],
+            "paths": unique_paths[:max_paths],
             "count": len(unique_paths),
             "message": "One or more destination files already exist.",
         },
@@ -706,11 +709,23 @@ class FileService:
         archive_rel: str,
         target_folder_rel: Optional[str] = None,
         overwrite: bool = False,
+        overwrite_paths: Optional[List[str]] = None,
+        skip_paths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Extract ZIP, TAR, or RAR after validating paths and expansion limits."""
         archive_path = get_safe_path(archive_rel, must_exist=True)
         if not archive_path.is_file():
             raise HTTPException(status_code=400, detail="Archive path must be a file.")
+
+        overwrite_paths = set(overwrite_paths or [])
+        skip_paths = set(skip_paths or [])
+        if len(overwrite_paths) + len(skip_paths) > MAX_EXTRACT_REVIEW_PATHS:
+            raise HTTPException(status_code=413, detail="Too many per-file extraction decisions.")
+        if overwrite_paths & skip_paths:
+            raise HTTPException(
+                status_code=400,
+                detail="A path cannot be both approved for overwrite and marked to skip.",
+            )
 
         if target_folder_rel:
             dest_dir = get_safe_path(target_folder_rel, must_exist=False)
@@ -821,7 +836,9 @@ class FileService:
                             },
                         )
                     if member_path.exists() and not overwrite:
-                        conflicts.append(relative.as_posix())
+                        relative_path = relative.as_posix()
+                        if relative_path not in overwrite_paths and relative_path not in skip_paths:
+                            conflicts.append(relative_path)
                 elif member_path.exists() and not member_path.is_dir():
                     raise HTTPException(
                         status_code=409,
@@ -834,9 +851,9 @@ class FileService:
                 planned[key] = is_directory
 
             if conflicts:
-                raise _overwrite_required(conflicts)
+                raise _overwrite_required(conflicts, max_paths=MAX_EXTRACT_REVIEW_PATHS)
 
-        def copy_member(source, target: Path, expected_size: int) -> None:
+        def copy_member(source, target: Path, expected_size: int, allow_overwrite: bool) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             remaining = expected_size
             temp_path = None
@@ -858,7 +875,7 @@ class FileService:
                             status_code=400, detail="Archive entry exceeds its declared size."
                         )
 
-                if overwrite:
+                if allow_overwrite:
                     os.replace(temp_path, target)
                 else:
                     try:
@@ -873,6 +890,7 @@ class FileService:
                 raise
 
         extracted_count = 0
+        skipped_count = 0
         try:
             if zipfile.is_zipfile(archive_path):
                 with zipfile.ZipFile(archive_path, "r") as zip_file:
@@ -905,8 +923,15 @@ class FileService:
                         if is_directory:
                             member_path.mkdir(parents=True, exist_ok=True)
                         else:
+                            relative_path = member_path.relative_to(dest_root).as_posix()
+                            if not overwrite and relative_path in skip_paths and member_path.exists():
+                                skipped_count += 1
+                                continue
                             with zip_file.open(member, "r") as source:
-                                copy_member(source, member_path, member.file_size)
+                                copy_member(
+                                    source, member_path, member.file_size,
+                                    overwrite or relative_path in overwrite_paths,
+                                )
                         extracted_count += 1
 
             elif tarfile.is_tarfile(archive_path):
@@ -931,13 +956,20 @@ class FileService:
                         if is_directory:
                             member_path.mkdir(parents=True, exist_ok=True)
                         else:
+                            relative_path = member_path.relative_to(dest_root).as_posix()
+                            if not overwrite and relative_path in skip_paths and member_path.exists():
+                                skipped_count += 1
+                                continue
                             source = tar_file.extractfile(member)
                             if source is None:
                                 raise HTTPException(
                                     status_code=400, detail="Could not read archive entry."
                                 )
                             with source:
-                                copy_member(source, member_path, member.size)
+                                copy_member(
+                                    source, member_path, member.size,
+                                    overwrite or relative_path in overwrite_paths,
+                                )
                         extracted_count += 1
 
             elif FileService.is_rar_file(archive_path):
@@ -974,28 +1006,39 @@ class FileService:
                         if is_directory:
                             member_path.mkdir(parents=True, exist_ok=True)
                         else:
+                            relative_path = member_path.relative_to(dest_root).as_posix()
+                            if not overwrite and relative_path in skip_paths and member_path.exists():
+                                skipped_count += 1
+                                continue
                             expected_size = int(getattr(member, "file_size", 0))
                             if expected_size < 0:
                                 raise HTTPException(
                                     status_code=400, detail="Archive entry has an invalid size."
                                 )
                             with rar_file.open(member) as source:
-                                copy_member(source, member_path, expected_size)
+                                copy_member(
+                                    source, member_path, expected_size,
+                                    overwrite or relative_path in overwrite_paths,
+                                )
                         extracted_count += 1
             else:
                 raise HTTPException(status_code=400, detail="Unsupported archive format.")
 
-            if not extracted_count:
+            if not extracted_count and not skipped_count:
                 raise HTTPException(status_code=400, detail="Archive contains no entries.")
         except Exception as exc:
             if isinstance(exc, HTTPException):
                 raise
             raise HTTPException(status_code=500, detail=f"Could not extract archive: {exc}")
 
+        message = f"Extracted {extracted_count} entries to '{dest_dir.name}'."
+        if skipped_count:
+            message += f" Skipped {skipped_count} existing files."
         return {
             "status": "success",
-            "message": f"Extracted {extracted_count} entries to '{dest_dir.name}'.",
+            "message": message,
             "destination": str(dest_dir.relative_to(get_root_dir())).replace("\\", "/"),
+            "skipped": skipped_count,
         }
 
     @staticmethod

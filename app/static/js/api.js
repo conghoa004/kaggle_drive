@@ -160,10 +160,10 @@ const API = {
     });
   },
 
-  extractArchive(path, target_folder = null, overwrite = false) {
+  extractArchive(path, target_folder = null, overwrite = false, overwrite_paths = [], skip_paths = []) {
     return this.request("/api/files/extract", {
       method: "POST",
-      body: JSON.stringify({ path, target_folder, overwrite })
+      body: JSON.stringify({ path, target_folder, overwrite, overwrite_paths, skip_paths })
     });
   },
 

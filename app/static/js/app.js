@@ -1565,11 +1565,56 @@ const App = {
       try {
         res = await API.extractArchive(targetPath);
       } catch (error) {
-        const detail = error && error.data && error.data.detail;
+        let detail = error && error.data && error.data.detail;
         if (error.status !== 409 || !detail || detail.code !== "overwrite_required") throw error;
-        const confirmed = await UI.confirmOverwrite(detail.paths || [], detail.count);
-        if (!confirmed) return;
-        res = await API.extractArchive(targetPath, null, true);
+
+        const mode = await UI.chooseOverwriteMode(detail.paths || [], detail.count || 0);
+        if (mode === "all") {
+          res = await API.extractArchive(targetPath, null, true);
+        } else if (mode === "review") {
+          if ((detail.count || 0) > 1000) {
+            UI.toast(t("overwrite_review_unavailable"), "warning", 5000);
+            return;
+          }
+
+          const overwritePaths = [];
+          const skipPaths = [];
+          let conflicts = detail.paths || [];
+
+          while (true) {
+            for (const conflictPath of conflicts) {
+              const decision = await UI.confirmOverwriteFile(conflictPath);
+              if (decision === false) return;
+              if (decision === "overwrite") overwritePaths.push(conflictPath);
+              else skipPaths.push(conflictPath);
+            }
+
+            try {
+              res = await API.extractArchive(
+                targetPath, null, false, overwritePaths, skipPaths
+              );
+              break;
+            } catch (nextError) {
+              const nextDetail = nextError && nextError.data && nextError.data.detail;
+              if (
+                nextError.status !== 409 ||
+                !nextDetail ||
+                nextDetail.code !== "overwrite_required"
+              ) {
+                throw nextError;
+              }
+              if ((nextDetail.count || 0) > (nextDetail.paths || []).length) {
+                UI.toast(t("overwrite_review_unavailable"), "warning", 5000);
+                return;
+              }
+              detail = nextDetail;
+              conflicts = detail.paths || [];
+              if (!conflicts.length) throw nextError;
+            }
+          }
+        } else {
+          return;
+        }
       }
       UI.toast(res.message || t("extract_success_toast"), "success");
       this.loadDirectory(AppState.currentPath, false);

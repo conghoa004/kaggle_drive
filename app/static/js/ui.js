@@ -54,11 +54,28 @@ const UI = {
     const confirmButton = document.getElementById("confirmationConfirmButton");
     const confirmLabel = confirmButton && confirmButton.querySelector("span");
     const actionIcon = document.getElementById("confirmationActionIcon");
+    const extraButton = document.getElementById("confirmationExtraButton");
     if (title) title.textContent = options.title || t("confirm_title");
     if (message) message.textContent = options.message || "";
     if (cancelButton) cancelButton.textContent = options.cancelText || t("cancel");
     if (confirmLabel) confirmLabel.textContent = options.confirmText || t("confirm");
     if (actionIcon) actionIcon.className = "fa-solid " + (options.confirmIcon || "fa-check");
+    if (cancelButton) {
+      cancelButton.onclick = () => this.resolveConfirmation(
+        Object.prototype.hasOwnProperty.call(options, "cancelValue") ? options.cancelValue : false
+      );
+    }
+    if (confirmButton) {
+      confirmButton.onclick = () => this.resolveConfirmation(
+        Object.prototype.hasOwnProperty.call(options, "confirmValue") ? options.confirmValue : true
+      );
+    }
+    if (extraButton) {
+      const showExtra = Boolean(options.extraText);
+      extraButton.style.display = showExtra ? "" : "none";
+      extraButton.textContent = options.extraText || "";
+      extraButton.onclick = () => this.resolveConfirmation(options.extraValue);
+    }
 
     return new Promise(resolve => {
       this.confirmationResolver = resolve;
@@ -67,17 +84,48 @@ const UI = {
     });
   },
 
-  confirmOverwrite(paths = [], count = paths.length) {
+  overwriteMessage(paths = [], count = paths.length) {
     const shownPaths = paths.slice(0, 5);
     const moreCount = Math.max(0, count - shownPaths.length);
     const more = moreCount ? t("overwrite_more", { count: moreCount }) : "";
+    return t("overwrite_confirm", { paths: shownPaths.join(", "), more });
+  },
+
+  confirmOverwrite(paths = [], count = paths.length) {
     return this.confirm({
       title: t("overwrite_title"),
-      message: t("overwrite_confirm", {
-        paths: shownPaths.join(", "),
-        more
-      }),
+      message: this.overwriteMessage(paths, count),
       confirmText: t("overwrite_action"),
+      confirmIcon: "fa-file-circle-check"
+    });
+  },
+
+  chooseOverwriteMode(paths = [], count = paths.length) {
+    const reviewAvailable = count <= paths.length;
+    const message = this.overwriteMessage(paths, count) + (
+      reviewAvailable ? "" : "\n\n" + t("overwrite_review_unavailable")
+    );
+    return this.confirm({
+      title: t("overwrite_title"),
+      message,
+      cancelText: t("cancel"),
+      cancelValue: "cancel",
+      confirmText: t("overwrite_all"),
+      confirmValue: "all",
+      confirmIcon: "fa-file-circle-check",
+      extraText: reviewAvailable ? t("overwrite_review_each") : "",
+      extraValue: "review"
+    });
+  },
+
+  confirmOverwriteFile(path) {
+    return this.confirm({
+      title: t("overwrite_title"),
+      message: t("overwrite_file_confirm", { path }),
+      cancelText: t("overwrite_skip"),
+      cancelValue: "skip",
+      confirmText: t("overwrite_action"),
+      confirmValue: "overwrite",
       confirmIcon: "fa-file-circle-check"
     });
   },
@@ -87,7 +135,7 @@ const UI = {
     this.confirmationResolver = null;
     const modal = document.getElementById("confirmationModal");
     if (modal) modal.classList.remove("show");
-    if (resolve) resolve(Boolean(confirmed));
+    if (resolve) resolve(confirmed);
   },
 
   closeModal(modalId) {

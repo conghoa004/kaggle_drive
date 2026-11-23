@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 
 from app.security import get_root_dir, require_auth, get_safe_path
-from app.services.file_service import FileService, MEDIA_MIMETYPES
+from app.services.file_service import FileService, MEDIA_MIMETYPES, MAX_EXTRACT_REVIEW_PATHS
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -76,6 +76,8 @@ class ExtractRequest(BaseModel):
     path: str
     target_folder: Optional[str] = None
     overwrite: bool = False
+    overwrite_paths: List[str] = Field(default_factory=list, max_length=MAX_EXTRACT_REVIEW_PATHS)
+    skip_paths: List[str] = Field(default_factory=list, max_length=MAX_EXTRACT_REVIEW_PATHS)
 
 
 class DownloadUrlRequest(BaseModel):
@@ -393,7 +395,13 @@ def move_item(request: Request, payload: CopyMoveRequest):
 def extract_archive(request: Request, payload: ExtractRequest):
     """Extract an archive (.zip, .tar, .tar.gz, .rar)."""
     require_auth(request)
-    return FileService.extract_archive(payload.path, payload.target_folder, payload.overwrite)
+    return FileService.extract_archive(
+        payload.path,
+        payload.target_folder,
+        payload.overwrite,
+        payload.overwrite_paths,
+        payload.skip_paths,
+    )
 
 
 @router.post("/download-from-url")
