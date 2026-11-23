@@ -45,8 +45,14 @@ const API = {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        const errorMsg = data.detail || data.message || `Lỗi máy chủ (${response.status})`;
-        throw new Error(errorMsg);
+        const detail = data.detail;
+        const errorMsg = (typeof detail === "string" ? detail : detail && detail.message)
+          || data.message
+          || `L\u1ed7i m\u00e1y ch\u1ee7 (${response.status})`;
+        const error = new Error(errorMsg);
+        error.status = response.status;
+        error.data = data;
+        throw error;
       }
 
       return data;
@@ -102,6 +108,14 @@ const API = {
     });
   },
 
+  checkUploadConflicts(target_path, relative_paths, fileScope = null) {
+    return this.request("/api/files/upload/check", {
+      method: "POST",
+      body: JSON.stringify({ target_path, relative_paths }),
+      fileScope
+    });
+  },
+
   createFolder(path) {
     return this.request("/api/files/mkdir", {
       method: "POST",
@@ -151,10 +165,10 @@ const API = {
     });
   },
 
-  extractArchive(path, target_folder = null) {
+  extractArchive(path, target_folder = null, overwrite = false) {
     return this.request("/api/files/extract", {
       method: "POST",
-      body: JSON.stringify({ path, target_folder })
+      body: JSON.stringify({ path, target_folder, overwrite })
     });
   },
 
@@ -165,10 +179,10 @@ const API = {
     });
   },
 
-  downloadFromUrl(url, target_folder = "", filename = null) {
+  downloadFromUrl(url, target_folder = "", filename = null, overwrite = false) {
     return this.request("/api/files/download-from-url", {
       method: "POST",
-      body: JSON.stringify({ url, target_folder, filename })
+      body: JSON.stringify({ url, target_folder, filename, overwrite })
     });
   },
 

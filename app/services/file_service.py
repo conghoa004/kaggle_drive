@@ -91,6 +91,38 @@ def get_file_category(extension: str) -> str:
     return EXTENSION_CATEGORIES.get(extension.lower(), "generic")
 
 
+def _overwrite_required(paths: List[str]) -> HTTPException:
+    unique_paths = sorted(set(paths))
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "overwrite_required",
+            "paths": unique_paths[:10],
+            "count": len(unique_paths),
+            "message": "One or more destination files already exist.",
+        },
+    )
+
+
+def _resolve_upload_destination(base_folder: Path, relative_filename: str) -> Path:
+    raw_name = (relative_filename or "").replace("\\", "/")
+    parts = [part for part in raw_name.split("/") if part not in ("", ".")]
+    if raw_name.startswith("/") or not parts or any(
+        part == ".." or ":" in part for part in parts
+    ):
+        raise HTTPException(status_code=400, detail="Invalid upload filename.")
+
+    dest_path = base_folder.joinpath(*parts).resolve()
+    try:
+        dest_path.relative_to(base_folder.resolve())
+        dest_path.relative_to(get_root_dir().resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=403, detail="Upload destination escapes the configured root."
+        )
+    return dest_path
+
+
 class FileService:
 
     @staticmethod
@@ -328,30 +360,95 @@ class FileService:
         }
 
     @staticmethod
+    def get_upload_conflicts(
+        target_folder_rel: str, relative_filenames: List[str]
+    ) -> List[str]:
+        """Return existing files and duplicate names in an upload batch."""
+        base_folder = get_safe_path(target_folder_rel, must_exist=True)
+        if not base_folder.is_dir():
+            raise HTTPException(status_code=400, detail="Upload destination must be a directory.")
+
+        conflicts = []
+        seen = set()
+        root = get_root_dir().resolve()
+        for relative_filename in relative_filenames:
+            dest_path = _resolve_upload_destination(base_folder, relative_filename)
+            if dest_path.is_dir():
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "path_conflict",
+                        "message": "An upload destination is an existing directory.",
+                    },
+                )
+            key = os.path.normcase(os.path.normpath(str(dest_path)))
+            relative_path = str(dest_path.relative_to(root)).replace("\\", "/")
+            if key in seen:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "path_conflict",
+                        "message": "Upload contains duplicate destination paths.",
+                    },
+                )
+            parent = dest_path.parent
+            base_root = base_folder.resolve()
+            while parent != base_root:
+                if parent.exists() and not parent.is_dir():
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "path_conflict",
+                            "message": "Upload path conflicts with an existing file.",
+                        },
+                    )
+                parent_key = os.path.normcase(os.path.normpath(str(parent)))
+                if parent_key in seen:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "path_conflict",
+                            "message": "Upload paths conflict with each other.",
+                        },
+                    )
+                parent = parent.parent
+            prefix = key + os.sep
+            if any(existing.startswith(prefix) for existing in seen):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "path_conflict",
+                        "message": "Upload paths conflict with each other.",
+                    },
+                )
+            if dest_path.exists():
+                conflicts.append(relative_path)
+            seen.add(key)
+        return sorted(set(conflicts))
+
+    @staticmethod
     def save_uploaded_file(
         target_folder_rel: str,
         upload_file: UploadFile,
         relative_filename: Optional[str] = None,
         max_bytes: Optional[int] = None,
+        overwrite: bool = False,
     ) -> Dict[str, Any]:
         """Stream a bounded upload to a temporary file and atomically publish it."""
         base_folder = get_safe_path(target_folder_rel, must_exist=True)
         if not base_folder.is_dir():
             raise HTTPException(status_code=400, detail="Upload destination must be a directory.")
 
-        raw_name = (relative_filename or upload_file.filename or "uploaded_file").replace("\\", "/")
-        parts = [part for part in raw_name.split("/") if part not in ("", ".")]
-        if raw_name.startswith("/") or not parts or any(
-            part == ".." or ":" in part for part in parts
-        ):
-            raise HTTPException(status_code=400, detail="Invalid upload filename.")
-
-        dest_path = base_folder.joinpath(*parts).resolve()
-        try:
-            dest_path.relative_to(base_folder.resolve())
-            dest_path.relative_to(get_root_dir().resolve())
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Upload destination escapes the configured root.")
+        raw_name = relative_filename or upload_file.filename or "uploaded_file"
+        dest_path = _resolve_upload_destination(base_folder, raw_name)
+        if dest_path.is_dir():
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "path_conflict", "message": "An upload destination is an existing directory."},
+            )
+        if dest_path.exists() and not overwrite:
+            relative_path = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+            raise _overwrite_required([relative_path])
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         limit = settings.MAX_UPLOAD_BYTES if max_bytes is None else min(
@@ -374,7 +471,16 @@ class FileService:
                         )
                     output.write(chunk)
                     bytes_written += len(chunk)
-            os.replace(temp_path, dest_path)
+            if overwrite:
+                os.replace(temp_path, dest_path)
+            else:
+                try:
+                    os.link(temp_path, dest_path)
+                except FileExistsError:
+                    relative_path = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+                    raise _overwrite_required([relative_path])
+                temp_path.unlink()
+            temp_path = None
         except HTTPException:
             if temp_path:
                 temp_path.unlink(missing_ok=True)
@@ -604,6 +710,7 @@ class FileService:
     def extract_archive(
         archive_rel: str,
         target_folder_rel: Optional[str] = None,
+        overwrite: bool = False,
     ) -> Dict[str, Any]:
         """Extract ZIP, TAR, or RAR after validating paths and expansion limits."""
         archive_path = get_safe_path(archive_rel, must_exist=True)
@@ -663,6 +770,7 @@ class FileService:
 
         def validate_extraction_targets(checked_members) -> None:
             planned = {}
+            conflicts = []
             for _member, member_path, is_directory in checked_members:
                 relative = member_path.relative_to(dest_root)
                 key = os.path.normcase(os.path.normpath(str(member_path)))
@@ -672,7 +780,10 @@ class FileService:
                         continue
                     raise HTTPException(
                         status_code=409,
-                        detail="Archive paths conflict with existing or duplicate destination paths.",
+                        detail={
+                            "code": "path_conflict",
+                            "message": "Archive contains duplicate or conflicting paths.",
+                        },
                     )
 
                 parts = relative.parts
@@ -682,12 +793,18 @@ class FileService:
                     if planned.get(ancestor_key) is False:
                         raise HTTPException(
                             status_code=409,
-                            detail="Archive paths conflict with existing or duplicate destination paths.",
+                            detail={
+                                "code": "path_conflict",
+                                "message": "Archive paths conflict with each other.",
+                            },
                         )
                     if ancestor.exists() and not ancestor.is_dir():
                         raise HTTPException(
                             status_code=409,
-                            detail="Archive path conflicts with an existing file.",
+                            detail={
+                                "code": "path_conflict",
+                                "message": "Archive path conflicts with an existing file.",
+                            },
                         )
 
                 if not is_directory:
@@ -695,30 +812,44 @@ class FileService:
                     if any(existing.startswith(prefix) for existing in planned):
                         raise HTTPException(
                             status_code=409,
-                            detail="Archive paths conflict with existing or duplicate destination paths.",
+                            detail={
+                                "code": "path_conflict",
+                                "message": "Archive paths conflict with each other.",
+                            },
                         )
-                    if member_path.exists():
+                    if member_path.is_dir():
                         raise HTTPException(
                             status_code=409,
-                            detail="Extraction would overwrite an existing file.",
+                            detail={
+                                "code": "path_conflict",
+                                "message": "Archive file conflicts with an existing directory.",
+                            },
                         )
+                    if member_path.exists() and not overwrite:
+                        conflicts.append(relative.as_posix())
                 elif member_path.exists() and not member_path.is_dir():
                     raise HTTPException(
                         status_code=409,
-                        detail="Archive directory conflicts with an existing file.",
+                        detail={
+                            "code": "path_conflict",
+                            "message": "Archive directory conflicts with an existing file.",
+                        },
                     )
 
                 planned[key] = is_directory
 
+            if conflicts:
+                raise _overwrite_required(conflicts)
+
         def copy_member(source, target: Path, expected_size: int) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             remaining = expected_size
-            created = False
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            temp_path = None
             try:
-                descriptor = os.open(target, flags, 0o666)
-                created = True
-                with os.fdopen(descriptor, "wb") as output:
+                with tempfile.NamedTemporaryFile(
+                    mode="wb", dir=target.parent, prefix=".extract-", delete=False
+                ) as output:
+                    temp_path = Path(output.name)
                     while remaining:
                         chunk = source.read(min(settings.CHUNK_SIZE, remaining))
                         if not chunk:
@@ -731,13 +862,19 @@ class FileService:
                         raise HTTPException(
                             status_code=400, detail="Archive entry exceeds its declared size."
                         )
-            except FileExistsError:
-                raise HTTPException(
-                    status_code=409, detail="Extraction would overwrite an existing file."
-                )
+
+                if overwrite:
+                    os.replace(temp_path, target)
+                else:
+                    try:
+                        os.link(temp_path, target)
+                    except FileExistsError:
+                        raise _overwrite_required([target.relative_to(dest_root).as_posix()])
+                    temp_path.unlink()
+                temp_path = None
             except Exception:
-                if created:
-                    target.unlink(missing_ok=True)
+                if temp_path:
+                    temp_path.unlink(missing_ok=True)
                 raise
 
         extracted_count = 0
@@ -871,6 +1008,7 @@ class FileService:
         url: str,
         target_folder_rel: str = "",
         custom_filename: Optional[str] = None,
+        overwrite: bool = False,
     ) -> Dict[str, Any]:
         """Download bounded HTTP(S) data from public hosts with DNS-pinned connections."""
         base_folder = get_safe_path(target_folder_rel, must_exist=True)
@@ -935,7 +1073,8 @@ class FileService:
         dest_entry = base_folder / filename
         if dest_entry.is_symlink():
             raise HTTPException(
-                status_code=409, detail="A file with this name already exists."
+                status_code=409,
+                detail={"code": "path_conflict", "message": "Cannot overwrite a symbolic link."},
             )
         dest_path = dest_entry.resolve()
         try:
@@ -944,10 +1083,13 @@ class FileService:
             raise HTTPException(
                 status_code=403, detail="Download destination is outside configured root."
             )
-        if dest_path.exists():
+        if dest_path.is_dir():
             raise HTTPException(
-                status_code=409, detail="A file with this name already exists."
+                status_code=409,
+                detail={"code": "path_conflict", "message": "A directory already has this name."},
             )
+        if dest_path.exists() and not overwrite:
+            raise _overwrite_required([filename])
 
         class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, new_url):
@@ -1030,13 +1172,14 @@ class FileService:
                             )
                         output.write(chunk)
                         bytes_downloaded += len(chunk)
-            try:
-                os.link(temp_path, dest_path)
-            except FileExistsError:
-                raise HTTPException(
-                    status_code=409, detail="A file with this name already exists."
-                )
-            temp_path.unlink()
+            if overwrite:
+                os.replace(temp_path, dest_entry)
+            else:
+                try:
+                    os.link(temp_path, dest_entry)
+                except FileExistsError:
+                    raise _overwrite_required([filename])
+                temp_path.unlink()
             temp_path = None
         except HTTPException:
             if temp_path:

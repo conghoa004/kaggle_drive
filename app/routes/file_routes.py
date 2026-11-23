@@ -1,4 +1,5 @@
 import mimetypes
+import os
 from urllib.parse import quote
 from typing import List, Optional
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, Query, status
@@ -19,6 +20,19 @@ def _archive_chunks(archive_file):
         if not chunk:
             break
         yield chunk
+
+
+def _overwrite_required(paths: List[str]) -> HTTPException:
+    unique_paths = sorted(set(paths))
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "overwrite_required",
+            "paths": unique_paths[:10],
+            "count": len(unique_paths),
+            "message": "One or more destination files already exist.",
+        },
+    )
 
 
 class ContentSaveRequest(BaseModel):
@@ -57,15 +71,22 @@ class DuplicateRequest(BaseModel):
     path: str
 
 
+class UploadCheckRequest(BaseModel):
+    target_path: str = ""
+    relative_paths: List[str] = Field(..., min_length=1, max_length=1000)
+
+
 class ExtractRequest(BaseModel):
     path: str
     target_folder: Optional[str] = None
+    overwrite: bool = False
 
 
 class DownloadUrlRequest(BaseModel):
     url: str = Field(..., max_length=4096)
     target_folder: str = ""
     filename: Optional[str] = None
+    overwrite: bool = False
 
 
 class DownloadSelectedRequest(BaseModel):
@@ -169,12 +190,24 @@ def save_binary_file(request: Request, payload: BinarySaveRequest):
     return FileService.write_binary_file(payload.path, payload.content_b64)
 
 
+@router.post("/upload/check")
+def check_upload_conflicts(request: Request, payload: UploadCheckRequest):
+    """Check all upload destinations before sending file data."""
+    require_auth(request)
+    return {
+        "conflicts": FileService.get_upload_conflicts(
+            payload.target_path, payload.relative_paths
+        )
+    }
+
+
 @router.post("/upload")
 def upload_files(
     request: Request,
     target_path: str = Form(""),
     files: List[UploadFile] = File(...),
-    relative_paths: Optional[List[str]] = Form(None)
+    relative_paths: Optional[List[str]] = Form(None),
+    overwrite: bool = Form(False),
 ):
     """Upload files with per-file and aggregate size limits."""
     require_auth(request)
@@ -190,15 +223,24 @@ def upload_files(
         if sum(file_sizes) > settings.MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="Upload exceeds the configured size limit.")
 
+        filenames = [
+            relative_paths[idx]
+            if relative_paths and idx < len(relative_paths) and relative_paths[idx]
+            else upload_file.filename or "uploaded_file"
+            for idx, upload_file in enumerate(files)
+        ]
+        conflicts = FileService.get_upload_conflicts(target_path, filenames)
+        if conflicts and not overwrite:
+            raise _overwrite_required(conflicts)
+
         for idx, upload_file in enumerate(files):
-            rel_filename = None
-            if relative_paths and idx < len(relative_paths) and relative_paths[idx]:
-                rel_filename = relative_paths[idx]
+            rel_filename = filenames[idx]
             result = FileService.save_uploaded_file(
                 target_folder_rel=target_path,
                 upload_file=upload_file,
                 relative_filename=rel_filename,
                 max_bytes=file_sizes[idx],
+                overwrite=overwrite,
             )
             results.append(result)
     finally:
@@ -222,6 +264,7 @@ def upload_file_chunk(
     total_size: int = Form(...),
     batch_size: int = Form(...),
     chunk: UploadFile = File(...),
+    overwrite: bool = Form(False),
 ):
     """Append one bounded upload chunk and atomically publish the completed file."""
     require_auth(request)
@@ -255,9 +298,19 @@ def upload_file_chunk(
     except ValueError:
         raise HTTPException(status_code=403, detail="Upload destination escapes the configured root.")
 
+    chunk_path = dest_path.with_name(f".upload-{upload_id}.part")
     try:
+        if dest_path.is_dir():
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "path_conflict", "message": "An upload destination is an existing directory."},
+            )
+        if dest_path.exists() and not overwrite:
+            chunk_path.unlink(missing_ok=True)
+            relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+            raise _overwrite_required([relative_dest])
+
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        chunk_path = dest_path.with_name(f".upload-{upload_id}.part")
         data = chunk.file.read(settings.UPLOAD_CHUNK_BYTES + 1)
         if len(data) > settings.UPLOAD_CHUNK_BYTES or offset + len(data) > total_size:
             raise HTTPException(status_code=413, detail="Upload chunk exceeds the configured limit.")
@@ -276,7 +329,16 @@ def upload_file_chunk(
 
         received = offset + len(data)
         if received == total_size:
-            chunk_path.replace(dest_path)
+            if overwrite:
+                chunk_path.replace(dest_path)
+            else:
+                try:
+                    os.link(chunk_path, dest_path)
+                except FileExistsError:
+                    chunk_path.unlink(missing_ok=True)
+                    relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+                    raise _overwrite_required([relative_dest])
+                chunk_path.unlink()
             return {
                 "status": "success",
                 "filename": dest_path.name,
@@ -342,7 +404,7 @@ def duplicate_item(request: Request, payload: DuplicateRequest):
 def extract_archive(request: Request, payload: ExtractRequest):
     """Extract an archive (.zip, .tar, .tar.gz, .rar)."""
     require_auth(request)
-    return FileService.extract_archive(payload.path, payload.target_folder)
+    return FileService.extract_archive(payload.path, payload.target_folder, payload.overwrite)
 
 
 @router.post("/download-from-url")
@@ -352,7 +414,8 @@ def download_from_url(request: Request, payload: DownloadUrlRequest):
     return FileService.download_url_to_folder(
         url=payload.url,
         target_folder_rel=payload.target_folder,
-        custom_filename=payload.filename
+        custom_filename=payload.filename,
+        overwrite=payload.overwrite,
     )
 
 

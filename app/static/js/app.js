@@ -1192,7 +1192,16 @@ const App = {
     UI.toast(t("url_start_toast"), "info", 5000);
 
     try {
-      const res = await API.downloadFromUrl(url, AppState.currentPath, filename || null);
+      let res;
+      try {
+        res = await API.downloadFromUrl(url, AppState.currentPath, filename || null);
+      } catch (error) {
+        const detail = error && error.data && error.data.detail;
+        if (error.status !== 409 || !detail || detail.code !== "overwrite_required") throw error;
+        const confirmed = await UI.confirmOverwrite(detail.paths || [], detail.count);
+        if (!confirmed) return;
+        res = await API.downloadFromUrl(url, AppState.currentPath, filename || null, true);
+      }
       UI.closeModal("downloadUrlModal");
       UI.toast(res.message || t("success"), "success");
       this.loadDirectory(AppState.currentPath, false);
@@ -1363,7 +1372,16 @@ const App = {
 
     try {
       UI.toast(t("extract_start_toast"), "info", 3000);
-      const res = await API.extractArchive(targetPath);
+      let res;
+      try {
+        res = await API.extractArchive(targetPath);
+      } catch (error) {
+        const detail = error && error.data && error.data.detail;
+        if (error.status !== 409 || !detail || detail.code !== "overwrite_required") throw error;
+        const confirmed = await UI.confirmOverwrite(detail.paths || [], detail.count);
+        if (!confirmed) return;
+        res = await API.extractArchive(targetPath, null, true);
+      }
       UI.toast(res.message || t("extract_success_toast"), "success");
       this.loadDirectory(AppState.currentPath, false);
       this.refreshSystemStats();

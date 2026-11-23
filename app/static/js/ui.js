@@ -67,6 +67,21 @@ const UI = {
     });
   },
 
+  confirmOverwrite(paths = [], count = paths.length) {
+    const shownPaths = paths.slice(0, 5);
+    const moreCount = Math.max(0, count - shownPaths.length);
+    const more = moreCount ? t("overwrite_more", { count: moreCount }) : "";
+    return this.confirm({
+      title: t("overwrite_title"),
+      message: t("overwrite_confirm", {
+        paths: shownPaths.join(", "),
+        more
+      }),
+      confirmText: t("overwrite_action"),
+      confirmIcon: "fa-file-circle-check"
+    });
+  },
+
   resolveConfirmation(confirmed) {
     const resolve = this.confirmationResolver;
     this.confirmationResolver = null;
