@@ -5,6 +5,23 @@
 const Uploader = {
   isUploading: false,
 
+  showProgress() {
+    const widget = document.getElementById("uploadProgressWidget");
+    if (!widget) return;
+    widget.classList.remove("hidden");
+    widget.setAttribute("aria-hidden", "false");
+    document.body.classList.add("upload-in-progress");
+  },
+
+  hideProgress() {
+    const widget = document.getElementById("uploadProgressWidget");
+    if (widget) {
+      widget.classList.add("hidden");
+      widget.setAttribute("aria-hidden", "true");
+    }
+    document.body.classList.remove("upload-in-progress");
+  },
+
   init() {
     this.setupGlobalDragDrop();
     this.setupFileInputs();
@@ -113,7 +130,7 @@ const Uploader = {
     }
 
     this.isUploading = true;
-    UI.openModal("uploadModal");
+    this.showProgress();
 
     const progressBar = document.getElementById("uploadProgressBar");
     const progressText = document.getElementById("uploadProgressText");
@@ -172,7 +189,6 @@ const Uploader = {
           initialCheck.conflicts, initialCheck.conflicts.length
         );
         if (!confirmed) {
-          UI.closeModal("uploadModal");
           return;
         }
       }
@@ -183,7 +199,6 @@ const Uploader = {
           !skipPaths.has(destinationFor(relativePathFor(file)))
         );
         if (!uploadFiles.length) {
-          UI.closeModal("uploadModal");
           UI.toast(t("upload_success_skipped", {
             uploaded: 0,
             skipped: skipPaths.size
@@ -229,14 +244,12 @@ const Uploader = {
             conflicts.length
           );
           if (!await chooseConflicts(conflicts, conflictCount)) {
-            UI.closeModal("uploadModal");
             if (uploadAttempted) App.loadDirectory(AppState.currentPath);
             return;
           }
         }
       }
 
-      setTimeout(() => UI.closeModal("uploadModal"), 600);
       if (skipPaths.size) {
         UI.toast(t("upload_success_skipped", {
           uploaded: files.length - skipPaths.size,
@@ -248,13 +261,13 @@ const Uploader = {
       App.loadDirectory(AppState.currentPath);
       App.refreshSystemStats();
     } catch (error) {
-      UI.closeModal("uploadModal");
       const errorMsg = error && error.message ? error.message : t("upload_error");
       UI.toast(errorMsg, "error");
       if (uploadAttempted) App.loadDirectory(AppState.currentPath);
       throw error;
     } finally {
       this.isUploading = false;
+      this.hideProgress();
     }
   },
 
