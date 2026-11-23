@@ -160,13 +160,6 @@ const API = {
     });
   },
 
-  duplicateItem(path) {
-    return this.request("/api/files/duplicate", {
-      method: "POST",
-      body: JSON.stringify({ path })
-    });
-  },
-
   extractArchive(path, target_folder = null, overwrite = false) {
     return this.request("/api/files/extract", {
       method: "POST",

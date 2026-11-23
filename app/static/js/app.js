@@ -963,12 +963,6 @@ const App = {
             </div>
           </button>
           <div class="context-menu-divider"></div>
-          <button class="context-menu-item" onclick="App.hideContextMenu(); App.duplicateItem('${safePath}')">
-            <div class="context-item-left">
-              <span class="context-item-icon"><i class="fa-regular fa-copy"></i></span>
-              <span>${t("action_duplicate")}</span>
-            </div>
-          </button>
           <button class="context-menu-item" onclick="App.hideContextMenu(); App.promptRename('${safePath}')">
             <div class="context-item-left">
               <span class="context-item-icon"><i class="fa-regular fa-pen-to-square"></i></span>
@@ -1091,12 +1085,6 @@ const App = {
 
         itemsHtml += `
           <div class="context-menu-divider"></div>
-          <button class="context-menu-item" onclick="App.hideContextMenu(); App.duplicateItem('${safePath}')">
-            <div class="context-item-left">
-              <span class="context-item-icon"><i class="fa-regular fa-copy"></i></span>
-              <span>${t("action_duplicate")}</span>
-            </div>
-          </button>
           <button class="context-menu-item" onclick="App.hideContextMenu(); App.promptRename('${safePath}')">
             <div class="context-item-left">
               <span class="context-item-icon"><i class="fa-regular fa-pen-to-square"></i></span>
@@ -1567,19 +1555,6 @@ const App = {
     }
   },
 
-  async duplicateItem(path) {
-    const targetPath = path || Array.from(AppState.selectedItems)[0];
-    if (!targetPath) return;
-
-    try {
-      await API.duplicateItem(targetPath);
-      UI.toast(t("duplicate_success_toast"), "success");
-      this.loadDirectory(AppState.currentPath, false);
-    } catch (err) {
-      UI.toast(err.message, "error");
-    }
-  },
-
   async extractArchive(path) {
     const targetPath = path || Array.from(AppState.selectedItems)[0];
     if (!targetPath) return;
@@ -1688,9 +1663,6 @@ const App = {
         </button>
         <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.promptCompress('${safePath}')">
           <i class="fa-solid fa-box-archive text-amber-500"></i> ${t("action_compress")}
-        </button>
-        <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.duplicateItem('${safePath}')">
-          <i class="fa-solid fa-copy"></i> ${t("action_duplicate")}
         </button>
         <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.promptRename('${safePath}')">
           <i class="fa-solid fa-tag"></i> ${t("action_rename")}

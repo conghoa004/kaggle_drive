@@ -67,10 +67,6 @@ class CopyMoveRequest(BaseModel):
     target_folder: str
 
 
-class DuplicateRequest(BaseModel):
-    path: str
-
-
 class UploadCheckRequest(BaseModel):
     target_path: str = ""
     relative_paths: List[str] = Field(..., min_length=1, max_length=1000)
@@ -391,13 +387,6 @@ def move_item(request: Request, payload: CopyMoveRequest):
     """Move an item to a target directory."""
     require_auth(request)
     return FileService.move_item(payload.source_path, payload.target_folder)
-
-
-@router.post("/duplicate")
-def duplicate_item(request: Request, payload: DuplicateRequest):
-    """Duplicate an item."""
-    require_auth(request)
-    return FileService.duplicate_item(payload.path)
 
 
 @router.post("/extract")

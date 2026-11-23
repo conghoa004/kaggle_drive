@@ -646,13 +646,6 @@ class FileService:
         return {"status": "success", "message": f"Moved '{source.name}'"}
 
     @staticmethod
-    def duplicate_item(source_rel: str) -> Dict[str, Any]:
-        """Duplicate a file or folder in place."""
-        source = get_safe_path_entry(source_rel, must_exist=True)
-        dest_folder = source.parent
-        return FileService.copy_item(source_rel, str(dest_folder.relative_to(get_root_dir())).replace("\\", "/"))
-
-    @staticmethod
     def create_zip_archive(rel_path: str = ""):
         """Build a size-limited ZIP in a spooled file."""
         target = get_safe_path(rel_path, must_exist=True)
