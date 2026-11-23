@@ -112,6 +112,47 @@ const API = {
     });
   },
 
+  startFileOperation(operation, payload = {}) {
+    return this.request("/api/files/operations", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, operation })
+    });
+  },
+
+  getFileOperation(operationId) {
+    return this.request("/api/files/operations/" + encodeURIComponent(operationId));
+  },
+
+  cancelFileOperation(operationId) {
+    return this.request("/api/files/operations/" + encodeURIComponent(operationId), {
+      method: "DELETE"
+    });
+  },
+
+  async downloadFileOperationZip(operationId, signal, filename = "selected_items.zip") {
+    const response = await fetch(
+      "/api/files/operations/" + encodeURIComponent(operationId) + "/download",
+      { signal }
+    );
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+      throw new Error("Session expired. Please sign in again.");
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || "Could not download the ZIP archive.");
+    }
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 5000);
+  },
+
   renameItem(path, new_name) {
     return this.request("/api/files/rename", {
       method: "POST",

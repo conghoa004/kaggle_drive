@@ -745,6 +745,104 @@ const App = {
     this.updateSelectionUI();
   },
 
+  createFileOperationControl(taskId) {
+    return {
+      taskId,
+      operationId: null,
+      completedOperationId: null,
+      downloadController: null,
+      cancelRequested: false,
+      cancelSent: false,
+      awaitingConfirmation: false
+    };
+  },
+
+  fileOperationCancelledError() {
+    const error = new Error(t("operation_cancelled"));
+    error.name = "AbortError";
+    return error;
+  },
+
+  async cancelFileOperationTask(control) {
+    control.cancelRequested = true;
+    if (control.awaitingConfirmation) UI.resolveConfirmation(false);
+    if (control.downloadController) {
+      control.downloadController.abort();
+    }
+    const operationId = control.operationId || control.completedOperationId;
+    if (operationId && !control.cancelSent) {
+      control.cancelSent = true;
+      try {
+        await API.cancelFileOperation(operationId);
+      } catch (error) {
+        control.cancelSent = false;
+        throw error;
+      }
+    }
+  },
+
+  async runFileOperationJob(operation, payload, control, detail, progress = null) {
+    if (control.cancelRequested) throw this.fileOperationCancelledError();
+    let operationId = null;
+    try {
+      const started = await API.startFileOperation(operation, payload);
+      operationId = started.operation_id;
+      control.operationId = operationId;
+      if (control.cancelRequested && !control.cancelSent) {
+        control.cancelSent = true;
+        try {
+          await API.cancelFileOperation(operationId);
+        } catch (_) {
+          control.cancelSent = false;
+        }
+      }
+
+      while (true) {
+        if (control.cancelRequested && !control.cancelSent) {
+          control.cancelSent = true;
+          try { await API.cancelFileOperation(operationId); } catch (_) {
+            control.cancelSent = false;
+          }
+        }
+        const state = await API.getFileOperation(operationId);
+        if (state.status === "completed") return state.result;
+        if (state.status === "failed") {
+          const operationError = state.error || {};
+          const errorDetail = operationError.detail;
+          const message = (typeof errorDetail === "string"
+            ? errorDetail
+            : errorDetail && errorDetail.message) || t("error");
+          const error = new Error(message);
+          error.status = operationError.status_code;
+          error.data = { detail: errorDetail };
+          throw error;
+        }
+        if (state.status === "cancelled") {
+          control.cancelRequested = true;
+          throw this.fileOperationCancelledError();
+        }
+
+        UI.updateBackgroundTask(control.taskId, {
+          detail: state.status === "cancelling" ? t("operation_canceling") : detail,
+          progress: Number.isFinite(state.progress) ? state.progress : progress
+        });
+        await new Promise(resolve => window.setTimeout(resolve, 350));
+      }
+    } catch (error) {
+      if (operationId && control.operationId === operationId && !control.cancelSent) {
+        control.cancelSent = true;
+        try { await API.cancelFileOperation(operationId); } catch (_) {}
+      }
+      throw error;
+    } finally {
+      if (operationId) control.completedOperationId = operationId;
+      if (!operationId || control.operationId === operationId) {
+        control.operationId = null;
+        control.cancelSent = false;
+      }
+    }
+  },
+
   async pasteClipboard(targetFolder = AppState.currentPath) {
     const clipboard = AppState.fileClipboard;
     if (!clipboard || !clipboard.paths.length) {
@@ -767,6 +865,7 @@ const App = {
     }
 
     this.clipboardPasteInProgress = true;
+    let control;
     const taskId = UI.startBackgroundTask(
       t(clipboard.operation === "cut" ? "clipboard_moving" : "clipboard_copying"),
       t("clipboard_operation_progress", {
@@ -774,12 +873,15 @@ const App = {
         total: pathsToPaste.length,
         name: ""
       }),
-      0
+      0,
+      () => this.cancelFileOperationTask(control)
     );
+    control = this.createFileOperationControl(taskId);
     try {
       const succeeded = [];
       const failed = [];
       for (let index = 0; index < pathsToPaste.length; index++) {
+        if (control.cancelRequested) break;
         const sourcePath = pathsToPaste[index];
         const name = sourcePath.split("/").pop() || sourcePath;
         UI.updateBackgroundTask(taskId, {
@@ -791,13 +893,20 @@ const App = {
           progress: (index / pathsToPaste.length) * 100
         });
         try {
-          if (clipboard.operation === "cut") {
-            await API.moveItem(sourcePath, targetPath);
-          } else {
-            await API.copyItem(sourcePath, targetPath);
-          }
+          await this.runFileOperationJob(
+            clipboard.operation === "cut" ? "move" : "copy",
+            { source_path: sourcePath, target_folder: targetPath },
+            control,
+            t("clipboard_operation_progress", {
+              current: index + 1,
+              total: pathsToPaste.length,
+              name
+            }),
+            (index / pathsToPaste.length) * 100
+          );
           succeeded.push(sourcePath);
         } catch (error) {
+          if (error && error.name === "AbortError") break;
           failed.push(error);
         }
         UI.updateBackgroundTask(taskId, {
@@ -814,10 +923,14 @@ const App = {
       }
 
       if (succeeded.length) {
-        await this.loadDirectory(targetPath, false);
+        if (AppState.currentPath === targetPath) {
+          await this.loadDirectory(targetPath, false);
+        }
         this.refreshSystemStats();
       }
-      if (failed.length) {
+      if (control.cancelRequested) {
+        UI.toast(t("operation_cancelled"), "info", 5000);
+      } else if (failed.length) {
         UI.toast(t("clipboard_paste_partial", {
           success: succeeded.length,
           failed: failed.length
@@ -1258,10 +1371,44 @@ const App = {
     window.location.href = `/api/files/download?path=${encodeURIComponent(path)}`;
   },
 
-  downloadZip(path = "") {
+  async downloadZip(path = "") {
     this.hideContextMenu();
     const targetPath = path || AppState.currentPath;
-    window.location.href = `/api/files/download-zip?path=${encodeURIComponent(targetPath)}`;
+    const folderName = targetPath.split("/").filter(Boolean).pop() || "kaggle_working";
+    const filename = `${folderName}.zip`;
+    let control;
+    const taskId = UI.startBackgroundTask(
+      t("download_folder_zip"),
+      t("background_operation_running"),
+      null,
+      () => this.cancelFileOperationTask(control)
+    );
+    control = this.createFileOperationControl(taskId);
+    try {
+      await this.runFileOperationJob(
+        "download_folder_zip",
+        { path: targetPath },
+        control,
+        t("background_operation_running")
+      );
+      if (control.cancelRequested) throw this.fileOperationCancelledError();
+      const downloadController = new AbortController();
+      control.downloadController = downloadController;
+      await API.downloadFileOperationZip(
+        control.completedOperationId,
+        downloadController.signal,
+        filename
+      );
+    } catch (error) {
+      if (error && (error.name === "AbortError" || control.cancelRequested)) {
+        UI.toast(t("operation_cancelled"), "info", 5000);
+      } else {
+        UI.toast(`${t("error")}: ${error.message}`, "error");
+      }
+    } finally {
+      control.downloadController = null;
+      UI.finishBackgroundTask(taskId);
+    }
   },
 
   previewItem(path) {
@@ -1380,16 +1527,37 @@ const App = {
       UI.toast(t("no_items_selected"), "warning");
       return;
     }
+    let control;
     const taskId = UI.startBackgroundTask(
       t("compressing_multi_toast", { count: items.length }),
-      t("background_operation_running")
+      t("background_operation_running"),
+      null,
+      () => this.cancelFileOperationTask(control)
     );
+    control = this.createFileOperationControl(taskId);
     try {
-      await API.downloadSelectedZip(items);
+      await this.runFileOperationJob(
+        "download_selected_zip",
+        { items },
+        control,
+        t("background_operation_running")
+      );
+      if (control.cancelRequested) throw this.fileOperationCancelledError();
+      const downloadController = new AbortController();
+      control.downloadController = downloadController;
+      await API.downloadFileOperationZip(
+        control.completedOperationId,
+        downloadController.signal
+      );
       UI.toast(t("compress_multi_success"), "success");
     } catch (err) {
-      UI.toast(`${t("error")}: ${err.message}`, "error");
+      if (err && (err.name === "AbortError" || control.cancelRequested)) {
+        UI.toast(t("operation_cancelled"), "info", 5000);
+      } else {
+        UI.toast(`${t("error")}: ${err.message}`, "error");
+      }
     } finally {
+      control.downloadController = null;
       UI.finishBackgroundTask(taskId);
     }
   },
@@ -1443,6 +1611,9 @@ const App = {
   async confirmDelete(items) {
     if (!Array.isArray(items) || !items.length) return;
     let successCount = 0;
+    let attempted = false;
+    const deletedPaths = new Set();
+    let control;
     const taskId = UI.startBackgroundTask(
       t("delete_in_progress"),
       t("clipboard_operation_progress", {
@@ -1450,11 +1621,14 @@ const App = {
         total: items.length,
         name: ""
       }),
-      0
+      0,
+      () => this.cancelFileOperationTask(control)
     );
+    control = this.createFileOperationControl(taskId);
 
     try {
       for (let index = 0; index < items.length; index++) {
+        if (control.cancelRequested) break;
         const itemPath = items[index];
         const name = itemPath.split("/").pop() || itemPath;
         UI.updateBackgroundTask(taskId, {
@@ -1466,9 +1640,22 @@ const App = {
           progress: (index / items.length) * 100
         });
         try {
-          await API.deleteItem(itemPath);
+          attempted = true;
+          await this.runFileOperationJob(
+            "delete",
+            { path: itemPath },
+            control,
+            t("clipboard_operation_progress", {
+              current: index + 1,
+              total: items.length,
+              name
+            }),
+            (index / items.length) * 100
+          );
           successCount++;
+          deletedPaths.add(itemPath);
         } catch (err) {
+          if (err && err.name === "AbortError") break;
           UI.toast(`${t("error")} (${itemPath}): ${err.message}`, "error");
         }
         UI.updateBackgroundTask(taskId, {
@@ -1478,7 +1665,13 @@ const App = {
 
       if (successCount > 0) {
         UI.toast(t("delete_success_toast", { count: successCount }), "success");
-        AppState.selectedItems.clear();
+        deletedPaths.forEach(itemPath => AppState.selectedItems.delete(itemPath));
+        this.updateSelectionUI();
+      }
+      if (control.cancelRequested) {
+        UI.toast(t("operation_cancelled"), "info", 5000);
+      }
+      if (successCount > 0 || attempted) {
         this.loadDirectory(AppState.currentPath, false);
         this.refreshSystemStats();
       }
@@ -1528,20 +1721,37 @@ const App = {
     if (!paths.length) return;
 
     const archiveName = nameInput ? nameInput.value.trim() : "";
+    const targetFolder = AppState.currentPath;
     UI.closeModal("compressModal");
+    let control;
     const taskId = UI.startBackgroundTask(
       t("compress_start_toast"),
-      t("background_operation_running")
+      t("background_operation_running"),
+      null,
+      () => this.cancelFileOperationTask(control)
     );
+    control = this.createFileOperationControl(taskId);
 
     try {
-      const res = await API.compressItems(paths, archiveName, AppState.currentPath);
+      const res = await this.runFileOperationJob(
+        "compress",
+        { paths, archive_name: archiveName, target_folder: targetFolder },
+        control,
+        t("background_operation_running")
+      );
       UI.toast(t("compress_success_toast", { name: res.archive_name || archiveName || "archive.zip" }), "success");
-      AppState.selectedItems.clear();
-      this.loadDirectory(AppState.currentPath, false);
+      paths.forEach(path => AppState.selectedItems.delete(path));
+      this.updateSelectionUI();
+      if (AppState.currentPath === targetFolder) {
+        this.loadDirectory(targetFolder, false);
+      }
       this.refreshSystemStats();
     } catch (err) {
-      UI.toast(`${t("error")}: ${err.message}`, "error");
+      if (err && err.name === "AbortError") {
+        UI.toast(t("operation_cancelled"), "info", 5000);
+      } else {
+        UI.toast(`${t("error")}: ${err.message}`, "error");
+      }
     } finally {
       UI.finishBackgroundTask(taskId);
     }
@@ -1551,21 +1761,40 @@ const App = {
     const targetPath = path || Array.from(AppState.selectedItems)[0];
     if (!targetPath) return;
 
+    const initialViewPath = AppState.currentPath;
+    let control;
     const taskId = UI.startBackgroundTask(
       t("extract_start_toast"),
-      t("background_operation_running")
+      t("background_operation_running"),
+      null,
+      () => this.cancelFileOperationTask(control)
     );
+    control = this.createFileOperationControl(taskId);
     try {
       let res;
       try {
-        res = await API.extractArchive(targetPath);
+        res = await this.runFileOperationJob(
+          "extract", { path: targetPath }, control,
+          t("background_operation_running")
+        );
       } catch (error) {
+        if (error && error.name === "AbortError") throw error;
         let detail = error && error.data && error.data.detail;
         if (error.status !== 409 || !detail || detail.code !== "overwrite_required") throw error;
 
-        const mode = await UI.chooseOverwriteMode(detail.paths || [], detail.count || 0);
+        control.awaitingConfirmation = true;
+        let mode;
+        try {
+          mode = await UI.chooseOverwriteMode(detail.paths || [], detail.count || 0);
+        } finally {
+          control.awaitingConfirmation = false;
+        }
+        if (control.cancelRequested) throw this.fileOperationCancelledError();
         if (mode === "all") {
-          res = await API.extractArchive(targetPath, null, true);
+          res = await this.runFileOperationJob(
+            "extract", { path: targetPath, overwrite: true }, control,
+            t("background_operation_running")
+          );
         } else if (mode === "review") {
           if ((detail.count || 0) > 1000) {
             UI.toast(t("overwrite_review_unavailable"), "warning", 5000);
@@ -1578,15 +1807,29 @@ const App = {
 
           while (true) {
             for (const conflictPath of conflicts) {
-              const decision = await UI.confirmOverwriteFile(conflictPath);
+              control.awaitingConfirmation = true;
+              let decision;
+              try {
+                decision = await UI.confirmOverwriteFile(conflictPath);
+              } finally {
+                control.awaitingConfirmation = false;
+              }
+              if (control.cancelRequested) throw this.fileOperationCancelledError();
               if (decision === false) return;
               if (decision === "overwrite") overwritePaths.push(conflictPath);
               else skipPaths.push(conflictPath);
             }
 
             try {
-              res = await API.extractArchive(
-                targetPath, null, false, overwritePaths, skipPaths
+              res = await this.runFileOperationJob(
+                "extract",
+                {
+                  path: targetPath,
+                  overwrite_paths: overwritePaths,
+                  skip_paths: skipPaths
+                },
+                control,
+                t("background_operation_running")
               );
               break;
             } catch (nextError) {
@@ -1612,10 +1855,16 @@ const App = {
         }
       }
       UI.toast(res.message || t("extract_success_toast"), "success");
-      this.loadDirectory(AppState.currentPath, false);
+      if (AppState.currentPath === initialViewPath) {
+        this.loadDirectory(initialViewPath, false);
+      }
       this.refreshSystemStats();
     } catch (err) {
-      UI.toast(err.message, "error");
+      if (err && err.name === "AbortError") {
+        UI.toast(t("operation_cancelled"), "info", 5000);
+      } else {
+        UI.toast(err.message, "error");
+      }
     } finally {
       UI.finishBackgroundTask(taskId);
     }

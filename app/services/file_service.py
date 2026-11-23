@@ -22,6 +22,7 @@ from fastapi import HTTPException, UploadFile, status
 
 from app.config import settings
 from app.security import get_root_dir, get_safe_path, get_safe_path_entry
+from app.services.file_operation_context import OperationCancelledError, check_cancelled
 
 # Extended MIME types and category classification
 EXTENSION_CATEGORIES = {
@@ -157,8 +158,9 @@ def _is_regular_archive_file(path: Path) -> bool:
         return False
 
 
-def _iter_archive_files(root: Path):
+def _iter_archive_files(root: Path, cancel_event=None):
     """Yield visible regular files while pruning symlinks and virtual system trees."""
+    check_cancelled(cancel_event)
     if _is_system_pseudo_path(root):
         return
 
@@ -168,15 +170,21 @@ def _iter_archive_files(root: Path):
     for directory, subdirectories, filenames in os.walk(
         root, topdown=True, onerror=ignore_walk_error, followlinks=False
     ):
+        check_cancelled(cancel_event)
         directory_path = Path(directory)
-        subdirectories[:] = [
-            name
-            for name in subdirectories
-            if not name.startswith(".")
-            and not (directory_path / name).is_symlink()
-            and not _is_system_pseudo_path(directory_path / name)
-        ]
+        visible_subdirectories = []
+        for name in subdirectories:
+            check_cancelled(cancel_event)
+            child = directory_path / name
+            if (
+                not name.startswith(".")
+                and not child.is_symlink()
+                and not _is_system_pseudo_path(child)
+            ):
+                visible_subdirectories.append(name)
+        subdirectories[:] = visible_subdirectories
         for filename in filenames:
+            check_cancelled(cancel_event)
             path = directory_path / filename
             relative = path.relative_to(root)
             if any(part.startswith(".") for part in relative.parts):
@@ -638,7 +646,7 @@ class FileService:
         return {"status": "success", "message": f"Đã tạo tệp '{target.name}'"}
 
     @staticmethod
-    def delete_item(rel_path: str) -> Dict[str, Any]:
+    def delete_item(rel_path: str, cancel_event=None) -> Dict[str, Any]:
         """Delete a file or recursively delete a directory."""
         target = get_safe_path_entry(rel_path, must_exist=True)
 
@@ -646,13 +654,22 @@ class FileService:
         if not target.is_symlink() and target.resolve() == get_root_dir().resolve():
             raise HTTPException(status_code=403, detail="Không thể xóa thư mục gốc!")
 
+        def remove_path(path: Path) -> None:
+            check_cancelled(cancel_event)
+            if path.is_symlink() or not path.is_dir():
+                path.unlink()
+                return
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    check_cancelled(cancel_event)
+                    remove_path(Path(entry.path))
+            check_cancelled(cancel_event)
+            path.rmdir()
+
         try:
-            if target.is_symlink():
-                target.unlink()
-            elif target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
+            remove_path(target)
+        except OperationCancelledError:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Không thể xóa: {str(e)}")
 
@@ -687,8 +704,11 @@ class FileService:
         }
 
     @staticmethod
-    def copy_item(source_rel: str, dest_folder_rel: str) -> Dict[str, Any]:
+    def copy_item(
+        source_rel: str, dest_folder_rel: str, cancel_event=None
+    ) -> Dict[str, Any]:
         """Copy an item while rejecting recursive directory copies."""
+        check_cancelled(cancel_event)
         source = get_safe_path_entry(source_rel, must_exist=True)
         if source.is_symlink():
             raise HTTPException(status_code=400, detail="Symbolic links cannot be copied.")
@@ -718,11 +738,38 @@ class FileService:
                 dest_item = dest_folder / name
                 counter += 1
 
+        def copy_file(source_path: str, destination_path: str) -> str:
+            check_cancelled(cancel_event)
+            source_file = Path(source_path)
+            destination_file = Path(destination_path)
+            with source_file.open("rb") as source_stream, destination_file.open("wb") as destination_stream:
+                while True:
+                    check_cancelled(cancel_event)
+                    chunk = source_stream.read(settings.CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    destination_stream.write(chunk)
+            check_cancelled(cancel_event)
+            shutil.copystat(source_file, destination_file)
+            return str(destination_file)
+
         try:
             if source.is_dir():
-                shutil.copytree(source, dest_item, symlinks=True)
+                shutil.copytree(
+                    source,
+                    dest_item,
+                    symlinks=True,
+                    copy_function=copy_file,
+                )
             else:
-                shutil.copy2(source, dest_item)
+                copy_file(str(source), str(dest_item))
+            check_cancelled(cancel_event)
+        except OperationCancelledError:
+            if dest_item.is_dir() and not dest_item.is_symlink():
+                shutil.rmtree(dest_item, ignore_errors=True)
+            elif dest_item.exists() or dest_item.is_symlink():
+                dest_item.unlink(missing_ok=True)
+            raise
         except Exception as exc:
             if dest_item.is_dir():
                 shutil.rmtree(dest_item, ignore_errors=True)
@@ -733,8 +780,11 @@ class FileService:
         return {"status": "success", "message": f"Copied to '{dest_item.name}'"}
 
     @staticmethod
-    def move_item(source_rel: str, dest_folder_rel: str) -> Dict[str, Any]:
+    def move_item(
+        source_rel: str, dest_folder_rel: str, cancel_event=None
+    ) -> Dict[str, Any]:
         """Move an item while rejecting moves into its own subtree."""
+        check_cancelled(cancel_event)
         source = get_safe_path_entry(source_rel, must_exist=True)
         dest_folder = get_safe_path(dest_folder_rel, must_exist=True)
         if not dest_folder.is_dir():
@@ -757,16 +807,49 @@ class FileService:
                 status_code=400,
                 detail=f"'{source.name}' already exists in the destination.",
             )
+        check_cancelled(cancel_event)
+
+        def copy_move_file(source_path: str, destination_path: str) -> str:
+            """Make shutil.move's cross-filesystem copy phase cancellable."""
+            check_cancelled(cancel_event)
+            source_file = Path(source_path)
+            destination_file = Path(destination_path)
+            with source_file.open("rb") as source_stream, destination_file.open("wb") as destination_stream:
+                while True:
+                    check_cancelled(cancel_event)
+                    chunk = source_stream.read(settings.CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    destination_stream.write(chunk)
+            check_cancelled(cancel_event)
+            shutil.copystat(source_file, destination_file)
+            return str(destination_file)
+
         try:
-            shutil.move(str(source), str(dest_item))
+            shutil.move(
+                str(source), str(dest_item), copy_function=copy_move_file
+            )
+        except OperationCancelledError:
+            # shutil.move does not remove the source until its cross-device copy
+            # succeeds, so removing this partial destination leaves the source intact.
+            if dest_item.is_dir() and not dest_item.is_symlink():
+                shutil.rmtree(dest_item, ignore_errors=True)
+            elif dest_item.exists() or dest_item.is_symlink():
+                dest_item.unlink(missing_ok=True)
+            raise
         except Exception as exc:
+            if dest_item.is_dir() and not dest_item.is_symlink():
+                shutil.rmtree(dest_item, ignore_errors=True)
+            elif dest_item.exists() or dest_item.is_symlink():
+                dest_item.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail=f"Could not move item: {exc}")
 
         return {"status": "success", "message": f"Moved '{source.name}'"}
 
     @staticmethod
-    def create_zip_archive(rel_path: str = ""):
+    def create_zip_archive(rel_path: str = "", cancel_event=None):
         """Build a size-limited ZIP in a spooled file."""
+        check_cancelled(cancel_event)
         target = get_safe_path_entry(rel_path, must_exist=True)
         if target.is_symlink():
             raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
@@ -778,13 +861,26 @@ class FileService:
 
         def add_file(zip_file, path, archive_name):
             nonlocal entries, total_bytes
+            check_cancelled(cancel_event)
             entries += 1
             total_bytes += path.stat().st_size
             if entries > settings.MAX_ARCHIVE_MEMBERS:
                 raise HTTPException(status_code=413, detail="ZIP contains too many files.")
             if total_bytes > settings.MAX_ARCHIVE_UNPACKED_BYTES:
                 raise HTTPException(status_code=413, detail="ZIP exceeds the configured uncompressed size limit.")
-            zip_file.write(path, arcname=archive_name)
+            zip_info = zipfile.ZipInfo.from_file(path, archive_name)
+            zip_info.compress_type = zip_file.compression
+            with path.open("rb") as source, zip_file.open(
+                zip_info,
+                "w",
+                force_zip64=zip_info.file_size > zipfile.ZIP64_LIMIT,
+            ) as archived:
+                while True:
+                    check_cancelled(cancel_event)
+                    chunk = source.read(settings.CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    archived.write(chunk)
 
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -796,7 +892,8 @@ class FileService:
                         )
                     add_file(zip_file, target, target.name)
                 elif target.is_dir():
-                    for path in _iter_archive_files(target):
+                    for path in _iter_archive_files(target, cancel_event=cancel_event):
+                        check_cancelled(cancel_event)
                         relative = path.relative_to(target)
                         add_file(zip_file, path, relative.as_posix())
                 else:
@@ -810,7 +907,7 @@ class FileService:
             return archive
         except Exception as exc:
             archive.close()
-            if isinstance(exc, HTTPException):
+            if isinstance(exc, (HTTPException, OperationCancelledError)):
                 raise
             raise HTTPException(status_code=500, detail=f"Could not create ZIP archive: {exc}")
 
@@ -833,8 +930,10 @@ class FileService:
         overwrite: bool = False,
         overwrite_paths: Optional[List[str]] = None,
         skip_paths: Optional[List[str]] = None,
+        cancel_event=None,
     ) -> Dict[str, Any]:
         """Extract ZIP, TAR, or RAR after validating paths and expansion limits."""
+        check_cancelled(cancel_event)
         archive_path = get_safe_path(archive_rel, must_exist=True)
         if not archive_path.is_file():
             raise HTTPException(status_code=400, detail="Archive path must be a file.")
@@ -910,6 +1009,7 @@ class FileService:
             planned = {}
             conflicts = []
             for _member, member_path, is_directory in checked_members:
+                check_cancelled(cancel_event)
                 relative = member_path.relative_to(dest_root)
                 key = os.path.normcase(os.path.normpath(str(member_path)))
 
@@ -1017,6 +1117,7 @@ class FileService:
                 ) as output:
                     temp_path = Path(output.name)
                     while remaining:
+                        check_cancelled(cancel_event)
                         chunk = source.read(min(settings.CHUNK_SIZE, remaining))
                         if not chunk:
                             raise HTTPException(
@@ -1024,6 +1125,7 @@ class FileService:
                             )
                         output.write(chunk)
                         remaining -= len(chunk)
+                    check_cancelled(cancel_event)
                     if source.read(1):
                         raise HTTPException(
                             status_code=400, detail="Archive entry exceeds its declared size."
@@ -1073,6 +1175,7 @@ class FileService:
 
                     checked_members = []
                     for member in members:
+                        check_cancelled(cancel_event)
                         mode = member.external_attr >> 16
                         file_type = stat_module.S_IFMT(mode)
                         if file_type not in (
@@ -1092,6 +1195,7 @@ class FileService:
                     ensure_transaction_dir()
 
                     for member, member_path, is_directory in checked_members:
+                        check_cancelled(cancel_event)
                         if is_directory:
                             ensure_directory(member_path)
                         else:
@@ -1114,6 +1218,7 @@ class FileService:
 
                     checked_members = []
                     for member in members:
+                        check_cancelled(cancel_event)
                         if not (member.isfile() or member.isdir()):
                             raise HTTPException(
                                 status_code=400,
@@ -1126,6 +1231,7 @@ class FileService:
                     ensure_transaction_dir()
 
                     for member, member_path, is_directory in checked_members:
+                        check_cancelled(cancel_event)
                         if is_directory:
                             ensure_directory(member_path)
                         else:
@@ -1162,6 +1268,7 @@ class FileService:
 
                     checked_members = []
                     for member in members:
+                        check_cancelled(cancel_event)
                         for flag_name in ("is_symlink", "is_hardlink"):
                             flag = getattr(member, flag_name, False)
                             if callable(flag):
@@ -1177,6 +1284,7 @@ class FileService:
                     ensure_transaction_dir()
 
                     for member, member_path, is_directory in checked_members:
+                        check_cancelled(cancel_event)
                         if is_directory:
                             ensure_directory(member_path)
                         else:
@@ -1226,6 +1334,8 @@ class FileService:
                 raise HTTPException(status_code=500, detail=detail) from exc
             if transaction_dir is not None:
                 shutil.rmtree(transaction_dir, ignore_errors=True)
+            if isinstance(exc, OperationCancelledError):
+                raise
             if isinstance(exc, HTTPException):
                 raise
             if _is_invalid_rar_error(exc):
@@ -1444,8 +1554,9 @@ class FileService:
         }
 
     @staticmethod
-    def create_zip_from_items(item_paths: List[str]):
+    def create_zip_from_items(item_paths: List[str], cancel_event=None):
         """Build a size-limited selected-items ZIP that spills to disk."""
+        check_cancelled(cancel_event)
         if not item_paths:
             raise HTTPException(status_code=400, detail="No items were selected.")
         targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
@@ -1457,17 +1568,31 @@ class FileService:
 
         def add_file(zip_file, path, archive_name):
             nonlocal entries, total_bytes
+            check_cancelled(cancel_event)
             entries += 1
             total_bytes += path.stat().st_size
             if entries > settings.MAX_ARCHIVE_MEMBERS:
                 raise HTTPException(status_code=413, detail="ZIP contains too many files.")
             if total_bytes > settings.MAX_ARCHIVE_UNPACKED_BYTES:
                 raise HTTPException(status_code=413, detail="ZIP exceeds the configured uncompressed size limit.")
-            zip_file.write(path, arcname=archive_name)
+            zip_info = zipfile.ZipInfo.from_file(path, archive_name)
+            zip_info.compress_type = zip_file.compression
+            with path.open("rb") as source, zip_file.open(
+                zip_info,
+                "w",
+                force_zip64=zip_info.file_size > zipfile.ZIP64_LIMIT,
+            ) as archived:
+                while True:
+                    check_cancelled(cancel_event)
+                    chunk = source.read(settings.CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    archived.write(chunk)
 
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                 for target in targets:
+                    check_cancelled(cancel_event)
                     if target.is_symlink():
                         raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
                     if _is_system_pseudo_path(target):
@@ -1484,12 +1609,13 @@ class FileService:
                         add_file(zip_file, target, target.name)
                     elif target.is_dir():
                         folder_entries = 0
-                        for path in _iter_archive_files(target):
+                        for path in _iter_archive_files(target, cancel_event):
                             relative = path.relative_to(target)
                             archive_name = (Path(target.name) / relative).as_posix()
                             add_file(zip_file, path, archive_name)
                             folder_entries += 1
                         if not folder_entries:
+                            check_cancelled(cancel_event)
                             entries += 1
                             if entries > settings.MAX_ARCHIVE_MEMBERS:
                                 raise HTTPException(status_code=413, detail="ZIP contains too many entries.")
@@ -1498,11 +1624,12 @@ class FileService:
                         raise HTTPException(status_code=400, detail="Selected item is not a regular file or directory.")
             if not entries:
                 raise HTTPException(status_code=400, detail="No files were available to archive.")
+            check_cancelled(cancel_event)
             archive.seek(0)
             return archive
         except Exception as exc:
             archive.close()
-            if isinstance(exc, HTTPException):
+            if isinstance(exc, (HTTPException, OperationCancelledError)):
                 raise
             raise HTTPException(status_code=500, detail=f"Could not create ZIP archive: {exc}")
 
@@ -1511,8 +1638,10 @@ class FileService:
         item_paths: List[str],
         archive_name: Optional[str] = None,
         target_folder_rel: Optional[str] = None,
+        cancel_event=None,
     ) -> Dict[str, Any]:
         """Create a complete ZIP atomically, within configured archive limits."""
+        check_cancelled(cancel_event)
         if not item_paths:
             raise HTTPException(status_code=400, detail="No items selected for compression.")
         targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
@@ -1553,6 +1682,7 @@ class FileService:
 
         def add_file(zip_file, path, archive_name):
             nonlocal file_count, entry_count, total_bytes
+            check_cancelled(cancel_event)
             entry_count += 1
             file_count += 1
             total_bytes += path.stat().st_size
@@ -1560,10 +1690,23 @@ class FileService:
                 raise HTTPException(status_code=413, detail="ZIP contains too many files.")
             if total_bytes > settings.MAX_ARCHIVE_UNPACKED_BYTES:
                 raise HTTPException(status_code=413, detail="ZIP exceeds the configured uncompressed size limit.")
-            zip_file.write(path, arcname=archive_name)
+            zip_info = zipfile.ZipInfo.from_file(path, archive_name)
+            zip_info.compress_type = zip_file.compression
+            with path.open("rb") as source, zip_file.open(
+                zip_info,
+                "w",
+                force_zip64=zip_info.file_size > zipfile.ZIP64_LIMIT,
+            ) as archived:
+                while True:
+                    check_cancelled(cancel_event)
+                    chunk = source.read(settings.CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    archived.write(chunk)
 
         def add_empty_directory(zip_file, archive_name):
             nonlocal entry_count
+            check_cancelled(cancel_event)
             entry_count += 1
             if entry_count > settings.MAX_ARCHIVE_MEMBERS:
                 raise HTTPException(status_code=413, detail="ZIP contains too many entries.")
@@ -1576,6 +1719,7 @@ class FileService:
                 temp_path = Path(output.name)
                 with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                     for target in targets:
+                        check_cancelled(cancel_event)
                         if _is_system_pseudo_path(target):
                             raise HTTPException(
                                 status_code=400,
@@ -1592,7 +1736,8 @@ class FileService:
                             add_file(zip_file, target, target.name)
                         elif target.is_dir():
                             directory_entries = 0
-                            for path in _iter_archive_files(target):
+                            for path in _iter_archive_files(target, cancel_event):
+                                check_cancelled(cancel_event)
                                 if path.resolve() in (dest.resolve(), temp_path.resolve()):
                                     continue
                                 relative = path.relative_to(target)
@@ -1604,14 +1749,16 @@ class FileService:
                         else:
                             raise HTTPException(status_code=400, detail="Selected item is not a regular file or directory.")
                 output.flush()
+                check_cancelled(cancel_event)
                 os.fsync(output.fileno())
             if not entry_count:
                 raise HTTPException(status_code=400, detail="No files were available to archive.")
+            check_cancelled(cancel_event)
             os.replace(temp_path, dest)
         except Exception as exc:
             if temp_path:
                 temp_path.unlink(missing_ok=True)
-            if isinstance(exc, HTTPException):
+            if isinstance(exc, (HTTPException, OperationCancelledError)):
                 raise
             raise HTTPException(status_code=500, detail=f"Could not create ZIP archive: {exc}")
 

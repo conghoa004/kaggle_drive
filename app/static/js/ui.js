@@ -34,7 +34,7 @@ const UI = {
     }, duration);
   },
 
-  startBackgroundTask(title, detail, progress = null) {
+  startBackgroundTask(title, detail, progress = null, onCancel = null) {
     const container = document.getElementById("backgroundTaskContainer");
     if (!container) return null;
 
@@ -53,6 +53,22 @@ const UI = {
     const titleText = document.createElement("span");
     titleElement.append(icon, titleText);
     heading.appendChild(titleElement);
+    let cancelButton = null;
+    if (typeof onCancel === "function") {
+      cancelButton = document.createElement("button");
+      cancelButton.type = "button";
+      cancelButton.className = "upload-cancel-button";
+      cancelButton.title = t("operation_cancel_button");
+      cancelButton.setAttribute("aria-label", t("operation_cancel_button"));
+      const cancelIcon = document.createElement("i");
+      cancelIcon.className = "fa-solid fa-xmark";
+      cancelIcon.setAttribute("aria-hidden", "true");
+      const cancelLabel = document.createElement("span");
+      cancelLabel.textContent = t("operation_cancel_button");
+      cancelButton.append(cancelIcon, cancelLabel);
+      cancelButton.addEventListener("click", () => this.cancelBackgroundTask(id));
+      heading.appendChild(cancelButton);
+    }
 
     const detailElement = document.createElement("div");
     detailElement.className = "upload-progress-file";
@@ -72,10 +88,34 @@ const UI = {
       title: titleText,
       detail: detailElement,
       fill,
-      progressText
+      progressText,
+      cancelButton,
+      cancelLabel: cancelButton && cancelButton.querySelector("span"),
+      onCancel,
+      cancelRequested: false
     });
     this.updateBackgroundTask(id, { title, detail, progress });
     return id;
+  },
+
+  async cancelBackgroundTask(id) {
+    const task = this.backgroundTasks.get(id);
+    if (!task || !task.cancelButton || task.cancelRequested) return;
+    task.cancelRequested = true;
+    task.cancelButton.disabled = true;
+    if (task.cancelLabel) task.cancelLabel.textContent = t("operation_canceling");
+    task.cancelButton.title = t("operation_canceling");
+    task.cancelButton.setAttribute("aria-label", t("operation_canceling"));
+    try {
+      await task.onCancel();
+    } catch (error) {
+      task.cancelRequested = false;
+      task.cancelButton.disabled = false;
+      if (task.cancelLabel) task.cancelLabel.textContent = t("operation_cancel_button");
+      task.cancelButton.title = t("operation_cancel_button");
+      task.cancelButton.setAttribute("aria-label", t("operation_cancel_button"));
+      this.toast(error.message || t("error"), "error");
+    }
   },
 
   updateBackgroundTask(id, update = {}) {

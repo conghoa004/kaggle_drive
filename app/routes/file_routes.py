@@ -1,7 +1,7 @@
 import mimetypes
 import os
 from urllib.parse import quote
-from typing import List, Optional
+from typing import List, Literal, Optional
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
@@ -10,6 +10,7 @@ from app.config import settings
 
 from app.security import get_root_dir, require_auth, get_safe_path
 from app.services.file_service import FileService, MEDIA_MIMETYPES, MAX_EXTRACT_REVIEW_PATHS
+from app.services.file_operation_manager import file_operation_manager
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -95,6 +96,22 @@ class CompressRequest(BaseModel):
     paths: List[str] = Field(..., min_length=1, max_length=1000)
     archive_name: Optional[str] = None
     target_folder: Optional[str] = None
+
+
+class FileOperationStartRequest(BaseModel):
+    operation: Literal[
+        "copy", "move", "delete", "compress", "extract", "download_selected_zip",
+        "download_folder_zip",
+    ]
+    source_path: Optional[str] = None
+    target_folder: Optional[str] = None
+    path: Optional[str] = None
+    paths: Optional[List[str]] = Field(None, max_length=1000)
+    items: Optional[List[str]] = Field(None, max_length=1000)
+    archive_name: Optional[str] = None
+    overwrite: bool = False
+    overwrite_paths: List[str] = Field(default_factory=list, max_length=MAX_EXTRACT_REVIEW_PATHS)
+    skip_paths: List[str] = Field(default_factory=list, max_length=MAX_EXTRACT_REVIEW_PATHS)
 
 
 @router.get("")
@@ -401,6 +418,64 @@ def delete_item(request: Request, payload: DeleteRequest):
     """Delete a file or folder recursively."""
     require_auth(request)
     return FileService.delete_item(payload.path)
+
+
+@router.post("/operations", status_code=202)
+def start_file_operation(request: Request, payload: FileOperationStartRequest):
+    """Start a cancellable file operation in a background worker."""
+    require_auth(request)
+    operation = payload.operation
+    if operation in {"copy", "move"}:
+        if payload.source_path is None or payload.target_folder is None:
+            raise HTTPException(status_code=422, detail="A source and destination are required.")
+    elif operation == "delete" and payload.path is None:
+        raise HTTPException(status_code=422, detail="A path is required.")
+    elif operation == "compress" and not payload.paths:
+        raise HTTPException(status_code=422, detail="At least one path is required.")
+    elif operation == "download_selected_zip" and not payload.items:
+        raise HTTPException(status_code=422, detail="At least one item is required.")
+    elif operation == "extract" and payload.path is None:
+        raise HTTPException(status_code=422, detail="An archive path is required.")
+
+    return file_operation_manager.start(
+        operation,
+        payload.dict(exclude={"operation"}, exclude_none=True),
+    )
+
+
+@router.get("/operations/{operation_id}")
+def get_file_operation(request: Request, operation_id: str):
+    """Read the state of one background file operation."""
+    require_auth(request)
+    operation = file_operation_manager.get(operation_id)
+    if operation is None:
+        raise HTTPException(status_code=404, detail="File operation not found.")
+    return operation
+
+
+@router.delete("/operations/{operation_id}")
+def cancel_file_operation(request: Request, operation_id: str):
+    """Request cooperative cancellation of one background file operation."""
+    require_auth(request)
+    operation = file_operation_manager.cancel(operation_id)
+    if operation is None:
+        raise HTTPException(status_code=404, detail="File operation not found.")
+    return operation
+
+
+@router.get("/operations/{operation_id}/download")
+def download_file_operation_archive(request: Request, operation_id: str):
+    """Stream a ZIP produced by a selected-items background operation."""
+    require_auth(request)
+    archive_file = file_operation_manager.take_archive(operation_id)
+    if archive_file is None:
+        raise HTTPException(status_code=409, detail="The archive is not available for download.")
+    return StreamingResponse(
+        _archive_chunks(archive_file),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="selected_items.zip"'},
+        background=BackgroundTask(archive_file.close),
+    )
 
 
 @router.post("/rename")
