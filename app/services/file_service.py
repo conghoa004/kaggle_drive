@@ -758,7 +758,9 @@ class FileService:
     @staticmethod
     def create_zip_archive(rel_path: str = ""):
         """Build a size-limited ZIP in a spooled file."""
-        target = get_safe_path(rel_path, must_exist=True)
+        target = get_safe_path_entry(rel_path, must_exist=True)
+        if target.is_symlink():
+            raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
         archive = tempfile.SpooledTemporaryFile(
             max_size=8 * 1024 * 1024, mode="w+b", dir=get_root_dir(), prefix=".zip-spool-"
         )
@@ -1432,7 +1434,7 @@ class FileService:
         """Build a size-limited selected-items ZIP that spills to disk."""
         if not item_paths:
             raise HTTPException(status_code=400, detail="No items were selected.")
-        targets = [get_safe_path(path, must_exist=True) for path in item_paths]
+        targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
         archive = tempfile.SpooledTemporaryFile(
             max_size=8 * 1024 * 1024, mode="w+b", dir=get_root_dir(), prefix=".zip-spool-"
         )
@@ -1452,6 +1454,8 @@ class FileService:
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                 for target in targets:
+                    if target.is_symlink():
+                        raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
                     if _is_system_pseudo_path(target):
                         raise HTTPException(
                             status_code=400,
@@ -1497,7 +1501,7 @@ class FileService:
         """Create a complete ZIP atomically, within configured archive limits."""
         if not item_paths:
             raise HTTPException(status_code=400, detail="No items selected for compression.")
-        targets = [get_safe_path(path, must_exist=True) for path in item_paths]
+        targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
         first = targets[0]
         dest_dir = get_safe_path(target_folder_rel, must_exist=True) if target_folder_rel else first.parent
         if not dest_dir.is_dir():
