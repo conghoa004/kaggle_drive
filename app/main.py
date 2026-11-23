@@ -1,10 +1,9 @@
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
@@ -108,10 +107,22 @@ class RequestBodyLimitMiddleware:
 
 
 class RequestAuthGateMiddleware:
-    """Reject protected API calls before FastAPI parses their request body."""
+    """Reject cross-origin and unauthenticated API calls before body parsing."""
 
     def __init__(self, app):
         self.app = app
+
+    async def _reject(self, send, status_code: int, detail: str):
+        body = json.dumps({"detail": detail}).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
@@ -119,18 +130,36 @@ class RequestAuthGateMiddleware:
             path == prefix or path.startswith(prefix + "/")
             for prefix in ("/api/files", "/api/system", "/api/services")
         )
+        is_api = path == "/api" or path.startswith("/api/")
+
+        if scope.get("type") == "http" and is_api:
+            headers = {
+                name.lower(): value
+                for name, value in scope.get("headers", [])
+            }
+            raw_origin = headers.get(b"origin")
+            if raw_origin:
+                try:
+                    origin = urlsplit(raw_origin.decode("latin-1"))
+                except ValueError:
+                    await self._reject(
+                        send, 403, "Cross-origin API requests are not allowed."
+                    )
+                    return
+                host = headers.get(b"host", b"").decode("latin-1").lower()
+                if (
+                    origin.scheme.lower() not in ("http", "https")
+                    or not origin.netloc
+                    or origin.netloc.lower() != host
+                ):
+                    await self._reject(
+                        send, 403, "Cross-origin API requests are not allowed."
+                    )
+                    return
+
         if scope.get("type") == "http" and protected:
             if scope.get("session", {}).get("authenticated") is not True:
-                body = json.dumps({"detail": "Not authenticated."}).encode("utf-8")
-                await send({
-                    "type": "http.response.start",
-                    "status": 401,
-                    "headers": [
-                        (b"content-type", b"application/json"),
-                        (b"content-length", str(len(body)).encode("ascii")),
-                    ],
-                })
-                await send({"type": "http.response.body", "body": body})
+                await self._reject(send, 401, "Not authenticated.")
                 return
         await self.app(scope, receive, send)
 
@@ -176,13 +205,6 @@ def create_app() -> FastAPI:
         max_age=settings.SESSION_MAX_AGE,
         same_site="lax",
         https_only=False
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
     )
     app.add_middleware(ServicesFileRootMiddleware)
 
