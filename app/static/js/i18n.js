@@ -154,6 +154,9 @@ const I18n = {
       upload_success: "Đã tải lên thành công {count} tệp!",
       upload_success_skipped: "Đã tải {uploaded} tệp, bỏ qua {skipped} tệp trùng tên.",
       upload_busy: "Đang có tiến trình tải lên khác. Vui lòng chờ.",
+      upload_cancel_button: "Hủy",
+      upload_canceling: "Đang hủy...",
+      upload_cancelled: "Đã dừng tải lên. Các tệp đã tải xong vẫn được giữ lại.",
       upload_error: "Lỗi kết nối khi tải lên.",
 
       // Editor Modal
@@ -503,6 +506,9 @@ const I18n = {
       upload_success: "Successfully uploaded {count} file(s)!",
       upload_success_skipped: "Uploaded {uploaded} file(s), skipped {skipped} existing file(s).",
       upload_busy: "Another upload is already in progress. Please wait.",
+      upload_cancel_button: "Cancel",
+      upload_canceling: "Canceling...",
+      upload_cancelled: "Upload stopped. Files already completed are kept.",
       upload_error: "Connection error during upload.",
 
       // Editor Modal
@@ -852,6 +858,9 @@ const I18n = {
       upload_success: "成功上传 {count} 个文件！",
       upload_success_skipped: "已上传 {uploaded} 个文件，跳过 {skipped} 个重名文件。",
       upload_busy: "已有文件正在上传中，请稍候。",
+      upload_cancel_button: "取消",
+      upload_canceling: "正在取消...",
+      upload_cancelled: "上传已停止。已完成的文件会保留。",
       upload_error: "上传时发生网络连接错误。",
 
       // Editor Modal

@@ -397,6 +397,8 @@
 .upload-progress-heading {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
@@ -408,6 +410,30 @@
   color: #0f172a;
   font-size: 14px;
   font-weight: 700;
+}
+
+.upload-cancel-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.upload-cancel-button:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.upload-cancel-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .upload-progress-file {

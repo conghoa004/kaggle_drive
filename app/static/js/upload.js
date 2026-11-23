@@ -4,12 +4,46 @@
 
 const Uploader = {
   isUploading: false,
+  cancelRequested: false,
+  activeXhr: null,
+  awaitingOverwriteConfirmation: false,
+
+  cancellationError() {
+    const error = new Error(t("upload_cancelled"));
+    error.name = "AbortError";
+    return error;
+  },
+
+  throwIfCancelled() {
+    if (this.cancelRequested) throw this.cancellationError();
+  },
+
+  cancelUpload() {
+    if (!this.isUploading || this.cancelRequested) return;
+    this.cancelRequested = true;
+
+    const button = document.getElementById("uploadCancelButton");
+    if (button) {
+      button.disabled = true;
+      const label = button.querySelector("[data-i18n]");
+      if (label) label.textContent = t("upload_canceling");
+    }
+
+    if (this.awaitingOverwriteConfirmation) UI.resolveConfirmation(false);
+    if (this.activeXhr) this.activeXhr.abort();
+  },
 
   showProgress() {
     const widget = document.getElementById("uploadProgressWidget");
     if (!widget) return;
     widget.classList.remove("hidden");
     widget.setAttribute("aria-hidden", "false");
+    const button = document.getElementById("uploadCancelButton");
+    if (button) {
+      button.disabled = false;
+      const label = button.querySelector("[data-i18n]");
+      if (label) label.textContent = t("upload_cancel_button");
+    }
     document.body.classList.add("upload-in-progress");
   },
 
@@ -19,6 +53,8 @@ const Uploader = {
       widget.classList.add("hidden");
       widget.setAttribute("aria-hidden", "true");
     }
+    const button = document.getElementById("uploadCancelButton");
+    if (button) button.disabled = false;
     document.body.classList.remove("upload-in-progress");
   },
 
@@ -130,6 +166,9 @@ const Uploader = {
     }
 
     this.isUploading = true;
+    this.cancelRequested = false;
+    this.activeXhr = null;
+    this.awaitingOverwriteConfirmation = false;
     this.showProgress();
 
     const progressBar = document.getElementById("uploadProgressBar");
@@ -159,7 +198,14 @@ const Uploader = {
         pending.length,
         count - (normalized.length - pending.length)
       );
-      const mode = await UI.chooseOverwriteMode(pending, knownCount);
+      this.awaitingOverwriteConfirmation = true;
+      let mode;
+      try {
+        mode = await UI.chooseOverwriteMode(pending, knownCount);
+      } finally {
+        this.awaitingOverwriteConfirmation = false;
+      }
+      this.throwIfCancelled();
       if (mode === "all") {
         pending.forEach(path => overwritePaths.add(path));
         return true;
@@ -167,7 +213,14 @@ const Uploader = {
       if (mode !== "review") return false;
 
       for (const path of pending) {
-        const decision = await UI.confirmOverwriteFile(path);
+        this.awaitingOverwriteConfirmation = true;
+        let decision;
+        try {
+          decision = await UI.confirmOverwriteFile(path);
+        } finally {
+          this.awaitingOverwriteConfirmation = false;
+        }
+        this.throwIfCancelled();
         if (decision === false) return false;
         if (decision === "overwrite") overwritePaths.add(path);
         else skipPaths.add(path);
@@ -184,6 +237,7 @@ const Uploader = {
       const initialCheck = await API.checkUploadConflicts(
         AppState.currentPath, relativePaths
       );
+      this.throwIfCancelled();
       if (initialCheck.conflicts && initialCheck.conflicts.length) {
         const confirmed = await chooseConflicts(
           initialCheck.conflicts, initialCheck.conflicts.length
@@ -222,6 +276,7 @@ const Uploader = {
           } else {
             await this.uploadFilesMultipart(uploadFiles, overwritePaths, skipPaths);
           }
+          this.throwIfCancelled();
           break;
         } catch (error) {
           const detail = error && error.data && error.data.detail;
@@ -234,6 +289,7 @@ const Uploader = {
             AppState.currentPath,
             uploadFiles.map(relativePathFor)
           );
+          this.throwIfCancelled();
           const conflicts = [...new Set([
             ...(detail.paths || []),
             ...(latest.conflicts || [])
@@ -261,12 +317,19 @@ const Uploader = {
       App.loadDirectory(AppState.currentPath);
       App.refreshSystemStats();
     } catch (error) {
+      if (this.cancelRequested || (error && error.name === "AbortError")) {
+        if (uploadAttempted) App.loadDirectory(AppState.currentPath);
+        UI.toast(t("upload_cancelled"), "info");
+        return;
+      }
       const errorMsg = error && error.message ? error.message : t("upload_error");
       UI.toast(errorMsg, "error");
       if (uploadAttempted) App.loadDirectory(AppState.currentPath);
       throw error;
     } finally {
       this.isUploading = false;
+      this.activeXhr = null;
+      this.awaitingOverwriteConfirmation = false;
       this.hideProgress();
     }
   },
@@ -284,6 +347,10 @@ const Uploader = {
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      this.activeXhr = xhr;
+      const clearActiveXhr = () => {
+        if (this.activeXhr === xhr) this.activeXhr = null;
+      };
       xhr.open("POST", "/api/files/upload", true);
       xhr.upload.onprogress = event => {
         if (event.lengthComputable) {
@@ -297,13 +364,21 @@ const Uploader = {
         }
       };
       xhr.onload = () => {
+        clearActiveXhr();
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
           reject(this.xhrError(xhr, t("upload_error")));
         }
       };
-      xhr.onerror = () => reject(new Error(t("upload_error")));
+      xhr.onerror = () => {
+        clearActiveXhr();
+        reject(new Error(t("upload_error")));
+      };
+      xhr.onabort = () => {
+        clearActiveXhr();
+        reject(this.cancellationError());
+      };
       xhr.send(formData);
     });
   },
@@ -349,6 +424,10 @@ const Uploader = {
 
         const chunkResult = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
+          this.activeXhr = xhr;
+          const clearActiveXhr = () => {
+            if (this.activeXhr === xhr) this.activeXhr = null;
+          };
           xhr.open("POST", "/api/files/upload/chunk", true);
           xhr.upload.onprogress = (event) => {
             if (event.lengthComputable && progressBar && progressText) {
@@ -360,6 +439,7 @@ const Uploader = {
             }
           };
           xhr.onload = () => {
+            clearActiveXhr();
             if (xhr.status >= 200 && xhr.status < 300) {
               try {
                 resolve(JSON.parse(xhr.responseText || "{}"));
@@ -370,7 +450,14 @@ const Uploader = {
             }
             reject(this.xhrError(xhr, "Upload failed (HTTP " + xhr.status + ")."));
           };
-          xhr.onerror = () => reject(new Error(t("upload_error")));
+          xhr.onerror = () => {
+            clearActiveXhr();
+            reject(new Error(t("upload_error")));
+          };
+          xhr.onabort = () => {
+            clearActiveXhr();
+            reject(this.cancellationError());
+          };
           xhr.send(formData);
         });
 

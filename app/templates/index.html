@@ -467,6 +467,10 @@
         <i class="fa-solid fa-cloud-arrow-up text-brand-600"></i>
         <span data-i18n="uploading_title">Đang tải lên máy chủ...</span>
       </h3>
+      <button id="uploadCancelButton" type="button" class="upload-cancel-button" onclick="Uploader.cancelUpload()" data-i18n-title="upload_cancel_button" title="Hủy tải lên">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        <span data-i18n="upload_cancel_button">Hủy</span>
+      </button>
     </div>
     <div id="uploadFileListText" class="upload-progress-file" data-i18n="upload_preparing">Đang chuẩn bị...</div>
     <div class="upload-progress-track" aria-hidden="true">
