@@ -932,12 +932,21 @@ class FileService:
         if filename in ("", ".", "..") or ":" in filename:
             raise HTTPException(status_code=400, detail="Invalid download filename.")
 
-        dest_path = (base_folder / filename).resolve()
+        dest_entry = base_folder / filename
+        if dest_entry.is_symlink():
+            raise HTTPException(
+                status_code=409, detail="A file with this name already exists."
+            )
+        dest_path = dest_entry.resolve()
         try:
             dest_path.relative_to(get_root_dir().resolve())
         except ValueError:
             raise HTTPException(
                 status_code=403, detail="Download destination is outside configured root."
+            )
+        if dest_path.exists():
+            raise HTTPException(
+                status_code=409, detail="A file with this name already exists."
             )
 
         class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1021,7 +1030,14 @@ class FileService:
                             )
                         output.write(chunk)
                         bytes_downloaded += len(chunk)
-            os.replace(temp_path, dest_path)
+            try:
+                os.link(temp_path, dest_path)
+            except FileExistsError:
+                raise HTTPException(
+                    status_code=409, detail="A file with this name already exists."
+                )
+            temp_path.unlink()
+            temp_path = None
         except HTTPException:
             if temp_path:
                 temp_path.unlink(missing_ok=True)
