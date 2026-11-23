@@ -41,6 +41,20 @@ const I18n = {
       warning: "Cảnh báo",
       info: "Thông tin",
 
+      file_copy: "Sao ch\u00e9p",
+      file_cut: "C\u1eaft",
+      file_paste: "D\u00e1n",
+      clipboard_clear: "X\u00f3a clipboard",
+      clipboard_copy_ready: "\u0110\u00e3 sao ch\u00e9p {count} m\u1ee5c. M\u1edf th\u01b0 m\u1ee5c \u0111\u00edch r\u1ed3i nh\u1ea5n Ctrl+V.",
+      clipboard_cut_ready: "\u0110\u00e3 c\u1eaft {count} m\u1ee5c. M\u1edf th\u01b0 m\u1ee5c \u0111\u00edch r\u1ed3i nh\u1ea5n Ctrl+V.",
+      clipboard_copy_status: "\u0110\u00e3 sao ch\u00e9p {count} m\u1ee5c \u00b7 Ctrl+V \u0111\u1ec3 d\u00e1n",
+      clipboard_cut_status: "\u0110\u00e3 c\u1eaft {count} m\u1ee5c \u00b7 Ctrl+V \u0111\u1ec3 d\u00e1n",
+      clipboard_pasted: "\u0110\u00e3 d\u00e1n {count} m\u1ee5c.",
+      clipboard_paste_partial: "\u0110\u00e3 d\u00e1n {success} m\u1ee5c; {failed} m\u1ee5c g\u1eb7p l\u1ed7i.",
+      clipboard_empty: "Kh\u00f4ng c\u00f3 m\u1ee5c n\u00e0o \u0111\u1ec3 d\u00e1n.",
+      clipboard_scope_error: "Ch\u1ec9 c\u00f3 th\u1ec3 d\u00e1n trong c\u00f9ng khu v\u1ef1c l\u01b0u tr\u1eef.",
+      clipboard_same_folder: "M\u1ee5c \u0111\u00e3 n\u1eb1m trong th\u01b0 m\u1ee5c n\u00e0y.",
+
       // Login
       username: "Tên đăng nhập",
       username_placeholder: "admin",
@@ -443,6 +457,20 @@ const I18n = {
       warning: "Warning",
       info: "Info",
 
+      file_copy: "Copy",
+      file_cut: "Cut",
+      file_paste: "Paste",
+      clipboard_clear: "Clear clipboard",
+      clipboard_copy_ready: "Copied {count} item(s). Open a destination folder and press Ctrl+V.",
+      clipboard_cut_ready: "Cut {count} item(s). Open a destination folder and press Ctrl+V.",
+      clipboard_copy_status: "Copied {count} item(s) \u00b7 Press Ctrl+V to paste",
+      clipboard_cut_status: "Cut {count} item(s) \u00b7 Press Ctrl+V to paste",
+      clipboard_pasted: "Pasted {count} item(s).",
+      clipboard_paste_partial: "Pasted {success} item(s); {failed} failed.",
+      clipboard_empty: "There are no items to paste.",
+      clipboard_scope_error: "Paste items in the same storage area they were copied from.",
+      clipboard_same_folder: "These items are already in this folder.",
+
       // Login
       username: "Username",
       username_placeholder: "admin",
@@ -844,6 +872,20 @@ const I18n = {
       error: "错误",
       warning: "警告",
       info: "提示",
+
+      file_copy: "\u590d\u5236",
+      file_cut: "\u526a\u5207",
+      file_paste: "\u7c98\u8d34",
+      clipboard_clear: "\u6e05\u7a7a\u526a\u8d34\u677f",
+      clipboard_copy_ready: "\u5df2\u590d\u5236 {count} \u4e2a\u9879\u76ee\u3002\u6253\u5f00\u76ee\u6807\u6587\u4ef6\u5939\u540e\u6309 Ctrl+V\u3002",
+      clipboard_cut_ready: "\u5df2\u526a\u5207 {count} \u4e2a\u9879\u76ee\u3002\u6253\u5f00\u76ee\u6807\u6587\u4ef6\u5939\u540e\u6309 Ctrl+V\u3002",
+      clipboard_copy_status: "\u5df2\u590d\u5236 {count} \u4e2a\u9879\u76ee \u00b7 \u6309 Ctrl+V \u7c98\u8d34",
+      clipboard_cut_status: "\u5df2\u526a\u5207 {count} \u4e2a\u9879\u76ee \u00b7 \u6309 Ctrl+V \u7c98\u8d34",
+      clipboard_pasted: "\u5df2\u7c98\u8d34 {count} \u4e2a\u9879\u76ee\u3002",
+      clipboard_paste_partial: "\u5df2\u7c98\u8d34 {success} \u4e2a\u9879\u76ee\uff1b{failed} \u4e2a\u5931\u8d25\u3002",
+      clipboard_empty: "\u6ca1\u6709\u53ef\u7c98\u8d34\u7684\u9879\u76ee\u3002",
+      clipboard_scope_error: "\u8bf7\u5728\u590d\u5236\u65f6\u6240\u5728\u7684\u5b58\u50a8\u533a\u57df\u5185\u7c98\u8d34\u3002",
+      clipboard_same_folder: "\u9879\u76ee\u5df2\u5728\u6b64\u6587\u4ef6\u5939\u4e2d\u3002",
 
       // Login
       username: "用户名",

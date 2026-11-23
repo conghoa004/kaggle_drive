@@ -200,6 +200,11 @@
   transform: translateY(-2px);
 }
 
+.file-card.cut-pending,
+.file-table tbody tr.cut-pending {
+  opacity: 0.48;
+}
+
 .file-card.selected {
   background: #eff6ff;
   border-color: #2563eb;
@@ -404,6 +409,11 @@
 .modal-overlay.show {
   display: flex !important;
   animation: fadeIn 0.2s ease;
+}
+
+/* Confirmation prompts must appear above any active modal. */
+#confirmationModal {
+  z-index: 10000 !important;
 }
 
 .modal-content {

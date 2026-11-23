@@ -144,17 +144,19 @@ const API = {
     });
   },
 
-  copyItem(source_path, target_folder) {
+  copyItem(source_path, target_folder, fileScope = null) {
     return this.request("/api/files/copy", {
       method: "POST",
-      body: JSON.stringify({ source_path, target_folder })
+      body: JSON.stringify({ source_path, target_folder }),
+      fileScope
     });
   },
 
-  moveItem(source_path, target_folder) {
+  moveItem(source_path, target_folder, fileScope = null) {
     return this.request("/api/files/move", {
       method: "POST",
-      body: JSON.stringify({ source_path, target_folder })
+      body: JSON.stringify({ source_path, target_folder }),
+      fileScope
     });
   },
 

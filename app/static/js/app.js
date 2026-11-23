@@ -9,6 +9,7 @@ const AppState = {
   rootDir: "",
   files: [],
   selectedItems: new Set(),
+  fileClipboard: null,
   lastSelectedPath: null,
   terminalCwd: "",
   viewMode: localStorage.getItem("kaggle_drive_view_mode") || "grid", // 'grid' | 'list'
@@ -27,6 +28,7 @@ const AppState = {
 const App = {
   serviceCredentialsModalData: null,
   serviceCredentialsRequestId: 0,
+  clipboardPasteInProgress: false,
 
   init() {
     I18n.init();
@@ -41,6 +43,7 @@ const App = {
     this.renderBreadcrumb();
     this.renderFiles();
     this.updateSelectionBar();
+    this.updateFileClipboardBar();
     this.renderTerminalTabs();
     const statsModal = document.getElementById("systemStatsModal");
     if (statsModal && statsModal.classList.contains("show") && AppState.systemStats) {
@@ -65,11 +68,21 @@ const App = {
     window.addEventListener("auth:unauthorized", () => {
       this.closeTerminalSession();
       this.clearServicesState();
+      AppState.fileClipboard = null;
+      this.updateFileClipboardBar();
       this.showLoginView();
     });
 
     // Global Key shortcuts
     window.addEventListener("keydown", (e) => {
+      const activeElement = document.activeElement;
+      const isEditable = activeElement instanceof HTMLElement && (
+        activeElement.matches("input, textarea, select") || activeElement.isContentEditable
+      );
+      const hasOpenModal = Boolean(document.querySelector(".modal-overlay.show"));
+      const mainContent = document.getElementById("mainContentArea");
+      const isFileManagerVisible = Boolean(mainContent && !mainContent.classList.contains("hidden"));
+
       if (e.key === "Escape") {
         this.hideContextMenu();
         const unsavedModal = document.getElementById("unsavedChangesModal");
@@ -82,20 +95,30 @@ const App = {
           this.setTerminalMinimized(true);
         }
         UI.closeAllModals();
-      } else if (e.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
-        e.preventDefault();
-        const searchInput = document.getElementById("searchInput");
-        if (searchInput) searchInput.focus();
-      } else if ((e.key === "Delete" || (e.ctrlKey && e.key === "Backspace")) && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
-        if (AppState.selectedItems.size > 0 && !document.querySelector(".modal-overlay.show")) {
+      } else if ((e.key === "Delete" || (e.ctrlKey && e.key === "Backspace")) && !isEditable) {
+        if (AppState.selectedItems.size > 0 && !hasOpenModal) {
           e.preventDefault();
           this.promptDelete();
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
-        if (!document.querySelector(".modal-overlay.show")) {
+      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !isEditable && !hasOpenModal) {
+        const key = e.key.toLowerCase();
+        if (isFileManagerVisible && key === "c" && AppState.selectedItems.size > 0) {
+          e.preventDefault();
+          this.copySelectedItems();
+        } else if (isFileManagerVisible && key === "x" && AppState.selectedItems.size > 0) {
+          e.preventDefault();
+          this.cutSelectedItems();
+        } else if (isFileManagerVisible && key === "v" && AppState.fileClipboard) {
+          e.preventDefault();
+          this.pasteClipboard();
+        } else if (isFileManagerVisible && key === "a") {
           e.preventDefault();
           this.toggleSelectAll(true);
         }
+      } else if (e.key === "/" && !isEditable) {
+        e.preventDefault();
+        const searchInput = document.getElementById("searchInput");
+        if (searchInput) searchInput.focus();
       }
     });
 
@@ -316,6 +339,8 @@ const App = {
       localStorage.removeItem("kaggle_drive_current_path");
     } catch (_) {}
     AppState.selectedItems.clear();
+    AppState.fileClipboard = null;
+    this.updateFileClipboardBar();
     this.showLoginView();
   },
 
@@ -422,6 +447,7 @@ const App = {
     } else {
       this.renderListView(filtered, container);
     }
+    this.updateSelectionUI();
   },
 
   renderGridView(items, container) {
@@ -649,6 +675,7 @@ const App = {
       } else {
         card.classList.remove("selected");
       }
+      card.classList.toggle("cut-pending", this.isCutPending(p));
     });
 
     // 2. List View rows & checkboxes
@@ -657,6 +684,7 @@ const App = {
       const p = row.getAttribute("data-path");
       const isSel = p && AppState.selectedItems.has(p);
       row.classList.toggle("selected", isSel);
+      row.classList.toggle("cut-pending", this.isCutPending(p));
       const cb = row.querySelector(".item-checkbox");
       if (cb) cb.checked = isSel;
     });
@@ -701,6 +729,141 @@ const App = {
     this.updateSelectionUI();
   },
 
+  clipboardSelection(path = null) {
+    if (path && !AppState.selectedItems.has(path)) return [path];
+    if (AppState.selectedItems.size) return Array.from(AppState.selectedItems);
+    return path ? [path] : [];
+  },
+
+  copySelectedItems(path = null) {
+    this.setFileClipboard("copy", this.clipboardSelection(path));
+  },
+
+  cutSelectedItems(path = null) {
+    this.setFileClipboard("cut", this.clipboardSelection(path));
+  },
+
+  setFileClipboard(operation, paths) {
+    const uniquePaths = [...new Set(paths)];
+    if (!uniquePaths.length) {
+      UI.toast(t("no_items_selected"), "warning");
+      return;
+    }
+
+    AppState.fileClipboard = {
+      operation,
+      paths: uniquePaths,
+      scope: AppState.isServicesMode ? "services" : "storage"
+    };
+    this.updateFileClipboardBar();
+    this.updateSelectionUI();
+    UI.toast(t(operation === "cut" ? "clipboard_cut_ready" : "clipboard_copy_ready", {
+      count: uniquePaths.length
+    }), "success");
+  },
+
+  isCutPending(path) {
+    const clipboard = AppState.fileClipboard;
+    return Boolean(
+      clipboard && clipboard.operation === "cut" &&
+      clipboard.scope === (AppState.isServicesMode ? "services" : "storage") &&
+      clipboard.paths.includes(path)
+    );
+  },
+
+  updateFileClipboardBar() {
+    const bar = document.getElementById("fileClipboardBar");
+    const status = document.getElementById("fileClipboardStatus");
+    if (!bar) return;
+
+    const clipboard = AppState.fileClipboard;
+    if (!clipboard || !clipboard.paths.length) {
+      bar.style.display = "none";
+      return;
+    }
+
+    bar.style.display = "flex";
+    if (status) {
+      const key = clipboard.operation === "cut" ? "clipboard_cut_status" : "clipboard_copy_status";
+      status.textContent = t(key, { count: clipboard.paths.length });
+    }
+  },
+
+  clearFileClipboard() {
+    AppState.fileClipboard = null;
+    this.updateFileClipboardBar();
+    this.updateSelectionUI();
+  },
+
+  async pasteClipboard(targetFolder = AppState.currentPath) {
+    const clipboard = AppState.fileClipboard;
+    if (!clipboard || !clipboard.paths.length) {
+      UI.toast(t("clipboard_empty"), "warning");
+      return;
+    }
+
+    const targetScope = AppState.isServicesMode ? "services" : "storage";
+    if (clipboard.scope !== targetScope) {
+      UI.toast(t("clipboard_scope_error"), "warning");
+      return;
+    }
+    if (this.clipboardPasteInProgress) return;
+
+    const targetPath = String(targetFolder || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    const pathsToPaste = clipboard.paths.filter(path => {
+      if (clipboard.operation !== "cut") return true;
+      const slash = path.lastIndexOf("/");
+      const sourceFolder = slash < 0 ? "" : path.slice(0, slash);
+      return sourceFolder !== targetPath;
+    });
+    if (!pathsToPaste.length) {
+      UI.toast(t("clipboard_same_folder"), "info");
+      return;
+    }
+
+    this.clipboardPasteInProgress = true;
+    try {
+      const succeeded = [];
+      const failed = [];
+      for (const sourcePath of pathsToPaste) {
+        try {
+          if (clipboard.operation === "cut") {
+            await API.moveItem(sourcePath, targetPath, clipboard.scope);
+          } else {
+            await API.copyItem(sourcePath, targetPath, clipboard.scope);
+          }
+          succeeded.push(sourcePath);
+        } catch (error) {
+          failed.push(error);
+        }
+      }
+
+      if (clipboard.operation === "cut" && succeeded.length) {
+        const completed = new Set(succeeded);
+        const remaining = clipboard.paths.filter(path => !completed.has(path));
+        AppState.fileClipboard = remaining.length ? { ...clipboard, paths: remaining } : null;
+        this.updateFileClipboardBar();
+        this.updateSelectionUI();
+      }
+
+      if (succeeded.length) {
+        await this.loadDirectory(targetPath, false, clipboard.scope);
+        this.refreshSystemStats();
+      }
+      if (failed.length) {
+        UI.toast(t("clipboard_paste_partial", {
+          success: succeeded.length,
+          failed: failed.length
+        }), succeeded.length ? "warning" : "error", 5000);
+        UI.toast(failed[0].message || t("error"), "error", 5000);
+      } else if (succeeded.length) {
+        UI.toast(t("clipboard_pasted", { count: succeeded.length }), "success");
+      }
+    } finally {
+      this.clipboardPasteInProgress = false;
+    }
+  },
+
   showContextMenuAt(x, y, path) {
     const menu = document.getElementById("contextMenu");
     const header = document.getElementById("contextMenuHeader");
@@ -717,6 +880,21 @@ const App = {
       }
 
       body.innerHTML = `
+        <button class="context-menu-item" onclick="App.hideContextMenu(); App.copySelectedItems()">
+          <div class="context-item-left">
+            <span class="context-item-icon"><i class="fa-solid fa-copy"></i></span>
+            <span>${t("file_copy")}</span>
+          </div>
+          <span class="context-item-kbd">Ctrl+C</span>
+        </button>
+        <button class="context-menu-item" onclick="App.hideContextMenu(); App.cutSelectedItems()">
+          <div class="context-item-left">
+            <span class="context-item-icon"><i class="fa-solid fa-scissors"></i></span>
+            <span>${t("file_cut")}</span>
+          </div>
+          <span class="context-item-kbd">Ctrl+X</span>
+        </button>
+        <div class="context-menu-divider"></div>
         <button class="context-menu-item" onclick="App.hideContextMenu(); App.promptCompress()">
           <div class="context-item-left">
             <span class="context-item-icon"><i class="fa-solid fa-box-archive"></i></span>
@@ -942,6 +1120,32 @@ const App = {
           </button>
         `;
       }
+      itemsHtml = `
+        <button class="context-menu-item" onclick="App.hideContextMenu(); App.copySelectedItems('${safePath}')">
+          <div class="context-item-left">
+            <span class="context-item-icon"><i class="fa-solid fa-copy"></i></span>
+            <span>${t("file_copy")}</span>
+          </div>
+          <span class="context-item-kbd">Ctrl+C</span>
+        </button>
+        <button class="context-menu-item" onclick="App.hideContextMenu(); App.cutSelectedItems('${safePath}')">
+          <div class="context-item-left">
+            <span class="context-item-icon"><i class="fa-solid fa-scissors"></i></span>
+            <span>${t("file_cut")}</span>
+          </div>
+          <span class="context-item-kbd">Ctrl+X</span>
+        </button>
+        ${item.is_dir && AppState.fileClipboard ? `
+          <button class="context-menu-item" onclick="App.hideContextMenu(); App.pasteClipboard('${safePath}')">
+            <div class="context-item-left">
+              <span class="context-item-icon"><i class="fa-solid fa-paste"></i></span>
+              <span>${t("file_paste")}</span>
+            </div>
+            <span class="context-item-kbd">Ctrl+V</span>
+          </button>
+        ` : ""}
+        <div class="context-menu-divider"></div>
+      ` + itemsHtml;
       body.innerHTML = itemsHtml;
     }
 
@@ -960,6 +1164,16 @@ const App = {
     }
 
     body.innerHTML = `
+      ${AppState.fileClipboard ? `
+        <button class="context-menu-item" onclick="App.hideContextMenu(); App.pasteClipboard()">
+          <div class="context-item-left">
+            <span class="context-item-icon"><i class="fa-solid fa-paste"></i></span>
+            <span>${t("file_paste")}</span>
+          </div>
+          <span class="context-item-kbd">Ctrl+V</span>
+        </button>
+        <div class="context-menu-divider"></div>
+      ` : ""}
       <button class="context-menu-item" onclick="App.hideContextMenu(); App.promptNewFolder()">
         <div class="context-item-left">
           <span class="context-item-icon"><i class="fa-solid fa-folder-plus"></i></span>
@@ -1420,6 +1634,19 @@ const App = {
     const safePath = UI.inlineJsString(path);
     let actions = `
       <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.copySelectedItems('${safePath}')">
+            <i class="fa-solid fa-copy"></i> ${t("file_copy")}
+          </button>
+          <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.cutSelectedItems('${safePath}')">
+            <i class="fa-solid fa-scissors"></i> ${t("file_cut")}
+          </button>
+        </div>
+        ${item.is_dir && AppState.fileClipboard ? `
+          <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.pasteClipboard('${safePath}')">
+            <i class="fa-solid fa-paste"></i> ${t("file_paste")}
+          </button>
+        ` : ""}
         ${!item.is_dir ? `
           ${(item.extension || "").toLowerCase() === "sh" ? `
             <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.runShellScript('${safePath}')">
