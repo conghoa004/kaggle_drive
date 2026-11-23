@@ -24,6 +24,7 @@ async def _upload_chunk_cleanup_loop():
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    await asyncio.to_thread(FileService.cleanup_stale_upload_chunks)
     cleanup_task = asyncio.create_task(_upload_chunk_cleanup_loop())
     try:
         yield

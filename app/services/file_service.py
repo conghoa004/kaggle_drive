@@ -1,4 +1,6 @@
+import hashlib
 import ipaddress
+import json
 import os
 import re
 import time
@@ -79,6 +81,64 @@ UPLOAD_CHUNK_TTL_SECONDS = 24 * 60 * 60
 UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS = 60 * 60
 _UPLOAD_CHUNK_DIRECTORIES: Dict[Path, float] = {}
 _UPLOAD_CHUNK_DIRECTORIES_LOCK = threading.Lock()
+_UPLOAD_CHUNK_DIRECTORY_REGISTRY_LOADED = False
+
+
+def _upload_chunk_directory_registry_path() -> Path:
+    root = get_root_dir().resolve()
+    root_hash = hashlib.sha256(os.fsencode(str(root))).hexdigest()
+    return Path(tempfile.gettempdir()) / f"kaggle-drive-upload-chunks-{root_hash}.json"
+
+
+def _load_upload_chunk_directories_locked() -> None:
+    """Load persisted upload directories once, accepting paths inside ROOT_DIR only."""
+    global _UPLOAD_CHUNK_DIRECTORY_REGISTRY_LOADED
+    if _UPLOAD_CHUNK_DIRECTORY_REGISTRY_LOADED:
+        return
+    _UPLOAD_CHUNK_DIRECTORY_REGISTRY_LOADED = True
+
+    try:
+        with _upload_chunk_directory_registry_path().open("r", encoding="utf-8") as registry_file:
+            directories = json.load(registry_file)
+    except (OSError, ValueError):
+        return
+    if not isinstance(directories, list):
+        return
+
+    root = get_root_dir().resolve()
+    now = time.monotonic()
+    for value in directories:
+        if not isinstance(value, str):
+            continue
+        try:
+            directory = Path(value).resolve()
+            directory.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        _UPLOAD_CHUNK_DIRECTORIES[directory] = now
+
+
+def _persist_upload_chunk_directories_locked() -> None:
+    """Atomically persist the current directory set without blocking uploads on errors."""
+    registry_path = _upload_chunk_directory_registry_path()
+    temporary_path = None
+    try:
+        payload = sorted(str(directory) for directory in _UPLOAD_CHUNK_DIRECTORIES)
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{registry_path.name}.", suffix=".tmp", dir=registry_path.parent
+        )
+        temporary_path = Path(temporary_name)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as registry_file:
+            json.dump(payload, registry_file)
+            registry_file.flush()
+            os.fsync(registry_file.fileno())
+        os.replace(temporary_path, registry_path)
+    except OSError:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _is_system_pseudo_path(path: Path) -> bool:
@@ -153,8 +213,11 @@ def _register_upload_chunk_directory(directory: Path) -> None:
     directory = directory.resolve()
     now = time.monotonic()
     with _UPLOAD_CHUNK_DIRECTORIES_LOCK:
+        _load_upload_chunk_directories_locked()
         last_registered = _UPLOAD_CHUNK_DIRECTORIES.get(directory)
         _UPLOAD_CHUNK_DIRECTORIES[directory] = now
+        if last_registered is None or now - last_registered >= 60:
+            _persist_upload_chunk_directories_locked()
     if last_registered is None or now - last_registered >= 60:
         _cleanup_stale_upload_chunk_files(directory)
 
@@ -217,6 +280,7 @@ class FileService:
     def cleanup_stale_upload_chunks() -> None:
         """Periodically clean expired chunks in directories used for uploads."""
         with _UPLOAD_CHUNK_DIRECTORIES_LOCK:
+            _load_upload_chunk_directories_locked()
             directories = list(_UPLOAD_CHUNK_DIRECTORIES.items())
         now = time.time()
         for directory, last_registered in directories:
@@ -225,6 +289,7 @@ class FileService:
             with _UPLOAD_CHUNK_DIRECTORIES_LOCK:
                 if _UPLOAD_CHUNK_DIRECTORIES.get(directory) == last_registered:
                     _UPLOAD_CHUNK_DIRECTORIES.pop(directory, None)
+                    _persist_upload_chunk_directories_locked()
 
     @staticmethod
     def register_upload_chunk_directory(directory: Path) -> None:

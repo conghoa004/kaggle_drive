@@ -2590,6 +2590,12 @@ const App = {
     tab.instance.focus();
   },
 
+  runDiskCheck(tab = this.getActiveTerminalTab()) {
+    const rootDir = String(AppState.rootDir || "/");
+    const quotedRoot = "'" + rootDir.replace(/'/g, "'\\''") + "'";
+    this.runTerminalCommand("df -h -- " + quotedRoot, tab);
+  },
+
   initDragSelect() {
     const container = document.getElementById("mainContentArea");
     if (!container) return;
