@@ -106,19 +106,42 @@ class PtyTerminalService:
             os.close(slave_fd)
             slave_fd = None
 
-            output_queue: asyncio.Queue = asyncio.Queue()
+            output_queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+            reader_paused = False
+
+            def pause_pty_reader():
+                nonlocal reader_paused
+                if not reader_paused:
+                    loop.remove_reader(master_fd)
+                    reader_paused = True
+
+            def resume_pty_reader():
+                nonlocal reader_paused
+                if reader_paused:
+                    reader_paused = False
+                    loop.add_reader(master_fd, read_pty)
+
+            def stop_pty_reader():
+                nonlocal reader_paused
+                loop.remove_reader(master_fd)
+                reader_paused = False
 
             def read_pty():
+                if output_queue.full():
+                    pause_pty_reader()
+                    return
                 try:
                     chunk = os.read(master_fd, 65536)
                 except OSError:
-                    loop.remove_reader(master_fd)
+                    stop_pty_reader()
                     output_queue.put_nowait(None)
                     return
                 if chunk:
                     output_queue.put_nowait(chunk)
+                    if output_queue.full():
+                        pause_pty_reader()
                 else:
-                    loop.remove_reader(master_fd)
+                    stop_pty_reader()
                     output_queue.put_nowait(None)
 
             async def send_output():
@@ -127,6 +150,8 @@ class PtyTerminalService:
                     if chunk is None:
                         return
                     await websocket.send_bytes(chunk)
+                    if reader_paused and not output_queue.full():
+                        resume_pty_reader()
 
             async def receive_input():
                 while True:
