@@ -157,12 +157,14 @@ class TestKaggleCloudDrive(unittest.TestCase):
         FileService.write_text_file("to_zip.txt", "Zip archive content")
 
         # 2. Stream zip
-        zip_mem = FileService.create_zip_archive("to_zip.txt")
-        self.assertGreater(zip_mem.getbuffer().nbytes, 0)
+        with FileService.create_zip_archive("to_zip.txt") as zip_mem:
+            zip_mem.seek(0, 2)
+            self.assertGreater(zip_mem.tell(), 0)
+            zip_mem.seek(0)
 
-        # 3. Verify zip structure
-        with zipfile.ZipFile(zip_mem, "r") as zf:
-            self.assertIn("to_zip.txt", zf.namelist())
+            # 3. Verify zip structure
+            with zipfile.ZipFile(zip_mem, "r") as zf:
+                self.assertIn("to_zip.txt", zf.namelist())
 
         # 4. Test tarfile extraction with Python 3.13 PEP 706 filter
         tar_path = settings.ROOT_DIR / "test_archive.tar"
@@ -204,19 +206,21 @@ class TestKaggleCloudDrive(unittest.TestCase):
         self.assertFalse((settings.ROOT_DIR / "item_b.txt").exists())
 
         # Multi-item zip archive
-        zip_mem = FileService.create_zip_from_items(["dest_folder/item_a.txt", "dest_folder/item_b.txt"])
-        self.assertGreater(zip_mem.getbuffer().nbytes, 0)
-        with zipfile.ZipFile(zip_mem, "r") as zf:
-            names = zf.namelist()
-            self.assertIn("item_a.txt", names)
-            self.assertIn("item_b.txt", names)
+        with FileService.create_zip_from_items(["dest_folder/item_a.txt", "dest_folder/item_b.txt"]) as zip_mem:
+            zip_mem.seek(0, 2)
+            self.assertGreater(zip_mem.tell(), 0)
+            zip_mem.seek(0)
+            with zipfile.ZipFile(zip_mem, "r") as zf:
+                names = zf.namelist()
+                self.assertIn("item_a.txt", names)
+                self.assertIn("item_b.txt", names)
 
         # Test folder in multi-zip preserves forward slashes
-        zip_mem_dir = FileService.create_zip_from_items(["dest_folder"])
-        with zipfile.ZipFile(zip_mem_dir, "r") as zf:
-            for name in zf.namelist():
-                self.assertNotIn("\\", name)
-                self.assertTrue(name.startswith("dest_folder/"))
+        with FileService.create_zip_from_items(["dest_folder"]) as zip_mem_dir:
+            with zipfile.ZipFile(zip_mem_dir, "r") as zf:
+                for name in zf.namelist():
+                    self.assertNotIn("\\", name)
+                    self.assertTrue(name.startswith("dest_folder/"))
 
     def test_09_auth_fouc_pre_rendering(self):
         """Test index page pre-renders dashboard for authenticated sessions and login for unauthenticated."""
@@ -262,8 +266,10 @@ class TestKaggleCloudDrive(unittest.TestCase):
         self.assertEqual(MEDIA_MIMETYPES["flac"], "audio/flac")
 
     def test_12_rar_archive_support(self):
-        """Verify RAR file detection, extraction CLI fallback, and Zip Slip safety."""
+        """Verify RAR detection, extraction, and invalid-archive handling."""
         from unittest.mock import patch, MagicMock
+        from io import BytesIO
+        from types import SimpleNamespace
 
         # 1. Detection tests
         rar_file = settings.ROOT_DIR / "sample.rar"
@@ -290,37 +296,30 @@ class TestKaggleCloudDrive(unittest.TestCase):
         dest_folder = settings.ROOT_DIR / "sample"
         dest_folder.mkdir(parents=True, exist_ok=True)
         sample_extracted = dest_folder / "extracted_file.txt"
+        rar_content = b"Hello RAR content"
+        rar_member = SimpleNamespace(
+            filename="extracted_file.txt",
+            file_size=len(rar_content),
+            is_dir=lambda: False,
+            is_symlink=False,
+            is_hardlink=False,
+        )
+        mock_rar = MagicMock()
+        mock_rar.__enter__.return_value = mock_rar
+        mock_rar.infolist.return_value = [rar_member]
+        mock_rar.open.return_value = BytesIO(rar_content)
 
-        def mock_subprocess_run(cmd, *args, **kwargs):
-            # Create the extracted file to simulate extractor output
-            sample_extracted.write_text("Hello RAR content", encoding="utf-8")
-            res = MagicMock()
-            res.returncode = 0
-            res.stdout = "Extracted 1 file"
-            res.stderr = ""
-            return res
+        with patch("rarfile.RarFile", return_value=mock_rar):
+            res = FileService.extract_archive("sample.rar")
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(sample_extracted.read_bytes(), rar_content)
+        self.assertIn("sample", res["destination"])
 
-        with patch("subprocess.run", side_effect=mock_subprocess_run):
-            with patch("shutil.which", return_value="/usr/bin/7z"):
-                res = FileService.extract_archive("sample.rar")
-                self.assertEqual(res["status"], "success")
-                self.assertTrue(sample_extracted.exists())
-                self.assertIn("sample", res["destination"])
-
-        # 4. Error handling when extractor CLI fails
-        def mock_subprocess_fail(cmd, *args, **kwargs):
-            res = MagicMock()
-            res.returncode = 1
-            res.stdout = ""
-            res.stderr = "Corrupted archive header"
-            return res
-
-        with patch("subprocess.run", side_effect=mock_subprocess_fail):
-            with patch("shutil.which", return_value="/usr/bin/7z"):
-                with self.assertRaises(HTTPException) as ctx:
-                    FileService.extract_archive("sample.rar")
-                self.assertEqual(ctx.exception.status_code, 500)
-                self.assertIn("Corrupted archive header", ctx.exception.detail)
+        # A .rar extension alone must not turn invalid contents into a server error.
+        with self.assertRaises(HTTPException) as ctx:
+            FileService.extract_archive("sample.rar")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Invalid or corrupted RAR archive", ctx.exception.detail)
 
     def test_13_spreadsheet_support(self):
         """Verify .csv and Excel (.xlsx, .xls) category mapping and MIME types."""

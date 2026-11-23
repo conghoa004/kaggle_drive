@@ -239,6 +239,15 @@ def get_file_category(extension: str) -> str:
     return EXTENSION_CATEGORIES.get(extension.lower(), "generic")
 
 
+def _is_invalid_rar_error(exc: Exception) -> bool:
+    """Identify an invalid RAR header without making rarfile mandatory."""
+    try:
+        import rarfile
+    except ImportError:
+        return False
+    return isinstance(exc, rarfile.NotRarFile)
+
+
 MAX_EXTRACT_REVIEW_PATHS = 1000
 
 
@@ -1219,6 +1228,11 @@ class FileService:
                 shutil.rmtree(transaction_dir, ignore_errors=True)
             if isinstance(exc, HTTPException):
                 raise
+            if _is_invalid_rar_error(exc):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid or corrupted RAR archive.",
+                ) from exc
             raise HTTPException(status_code=500, detail=f"Could not extract archive: {exc}")
 
         if transaction_dir is not None:
