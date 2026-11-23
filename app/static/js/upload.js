@@ -170,6 +170,12 @@ const Uploader = {
     this.activeXhr = null;
     this.awaitingOverwriteConfirmation = false;
     this.showProgress();
+    const targetPath = String(AppState.currentPath || "");
+    const refreshTargetView = () => {
+      if (AppState.currentPath === targetPath) {
+        App.loadDirectory(targetPath, false);
+      }
+    };
 
     const progressBar = document.getElementById("uploadProgressBar");
     const progressText = document.getElementById("uploadProgressText");
@@ -182,7 +188,7 @@ const Uploader = {
       .filter(part => part && part !== ".")
       .join("/");
     const destinationFor = relativePath => normalizePath(
-      [AppState.currentPath, relativePath].filter(Boolean).join("/")
+      [targetPath, relativePath].filter(Boolean).join("/")
     );
     const relativePathFor = file => file.webkitRelativePath || file.name;
     let uploadAttempted = false;
@@ -235,7 +241,7 @@ const Uploader = {
 
       const relativePaths = files.map(relativePathFor);
       const initialCheck = await API.checkUploadConflicts(
-        AppState.currentPath, relativePaths
+        targetPath, relativePaths
       );
       this.throwIfCancelled();
       if (initialCheck.conflicts && initialCheck.conflicts.length) {
@@ -271,10 +277,13 @@ const Uploader = {
           uploadAttempted = true;
           if (totalBytes > 80 * 1024 * 1024) {
             await this.uploadFilesInChunks(
-              uploadFiles, totalBytes, progressBar, progressText, overwritePaths, skipPaths
+              uploadFiles, totalBytes, progressBar, progressText,
+              overwritePaths, skipPaths, targetPath
             );
           } else {
-            await this.uploadFilesMultipart(uploadFiles, overwritePaths, skipPaths);
+            await this.uploadFilesMultipart(
+              uploadFiles, overwritePaths, skipPaths, targetPath
+            );
           }
           this.throwIfCancelled();
           break;
@@ -286,7 +295,7 @@ const Uploader = {
           if (++retries > 10) throw error;
 
           const latest = await API.checkUploadConflicts(
-            AppState.currentPath,
+            targetPath,
             uploadFiles.map(relativePathFor)
           );
           this.throwIfCancelled();
@@ -300,7 +309,7 @@ const Uploader = {
             conflicts.length
           );
           if (!await chooseConflicts(conflicts, conflictCount)) {
-            if (uploadAttempted) App.loadDirectory(AppState.currentPath);
+            if (uploadAttempted) refreshTargetView();
             return;
           }
         }
@@ -314,17 +323,17 @@ const Uploader = {
       } else {
         UI.toast(t("upload_success", { count: files.length }), "success");
       }
-      App.loadDirectory(AppState.currentPath);
+      refreshTargetView();
       App.refreshSystemStats();
     } catch (error) {
       if (this.cancelRequested || (error && error.name === "AbortError")) {
-        if (uploadAttempted) App.loadDirectory(AppState.currentPath);
+        if (uploadAttempted) refreshTargetView();
         UI.toast(t("upload_cancelled"), "info");
         return;
       }
       const errorMsg = error && error.message ? error.message : t("upload_error");
       UI.toast(errorMsg, "error");
-      if (uploadAttempted) App.loadDirectory(AppState.currentPath);
+      if (uploadAttempted) refreshTargetView();
       throw error;
     } finally {
       this.isUploading = false;
@@ -334,9 +343,11 @@ const Uploader = {
     }
   },
 
-  uploadFilesMultipart(files, overwritePaths = new Set(), skipPaths = new Set()) {
+  uploadFilesMultipart(
+    files, overwritePaths = new Set(), skipPaths = new Set(), targetPath = ""
+  ) {
     const formData = new FormData();
-    formData.append("target_path", AppState.currentPath);
+    formData.append("target_path", targetPath);
     formData.append("overwrite", "false");
     overwritePaths.forEach(path => formData.append("overwrite_paths", path));
     skipPaths.forEach(path => formData.append("skip_paths", path));
@@ -385,7 +396,7 @@ const Uploader = {
 
   async uploadFilesInChunks(
     files, totalBytes, progressBar, progressText,
-    overwritePaths = new Set(), skipPaths = new Set()
+    overwritePaths = new Set(), skipPaths = new Set(), targetPath = ""
   ) {
     const chunkSize = 8 * 1024 * 1024;
     let completedBytes = 0;
@@ -404,13 +415,13 @@ const Uploader = {
         const end = Math.min(offset + chunkSize, file.size);
         const blob = file.slice(offset, end);
         const formData = new FormData();
-        formData.append("target_path", AppState.currentPath);
+        formData.append("target_path", targetPath);
         formData.append("relative_path", file.webkitRelativePath || file.name);
         formData.append("upload_id", uploadId);
         formData.append("offset", String(offset));
         formData.append("total_size", String(file.size));
         formData.append("batch_size", String(totalBytes));
-        const destination = [AppState.currentPath, file.webkitRelativePath || file.name]
+        const destination = [targetPath, file.webkitRelativePath || file.name]
           .filter(Boolean)
           .join("/")
           .replace(/\\/g, "/")
