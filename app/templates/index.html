@@ -287,54 +287,57 @@
 
       <!-- Content Area -->
       <main id="mainContentArea" class="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-full" onclick="App.handleContainerClick(event)" oncontextmenu="App.handleContainerContextMenu(event)">
-        <!-- Content Header & Breadcrumb -->
-        <div class="flex items-center justify-between mb-4">
-          <nav id="breadcrumbContainer" class="flex items-center flex-wrap gap-2 text-sm sm:text-base font-bold text-slate-800">
-            <span class="breadcrumb-crumb active">
-              <i class="fa-solid fa-house-chimney icon-python"></i> working
-            </span>
-          </nav>
-        </div>
-
-        <!-- Action Toolbar -->
-        <div class="flex flex-wrap items-center justify-between gap-2.5 mb-5 pb-3 border-b border-slate-200/60">
-          <div class="flex flex-wrap items-center gap-2">
-            <button class="btn-tool" onclick="App.goBack()" title="Lên thư mục cha">
-              <i class="fa-solid fa-arrow-left"></i>
-              <span data-i18n="go_back">Quay lại</span>
-            </button>
-            <button class="btn-tool" onclick="App.refreshCurrentDirectory()" title="Làm mới danh sách">
-              <i class="fa-solid fa-rotate"></i>
-              <span data-i18n="refresh">Làm mới</span>
-            </button>
-            <button class="btn-tool" onclick="App.downloadZip()" title="Nén thư mục hiện tại thành file .zip và tải về" data-i18n-title="download_folder_zip_title">
-              <i class="fa-solid fa-file-zipper text-brand-600"></i>
-              <span data-i18n="download_folder_zip">Tải thư mục (.ZIP)</span>
-            </button>
+        <div class="sticky top-0 z-20 bg-slate-50">
+          <!-- Content Header & Breadcrumb -->
+          <div class="flex items-center justify-between mb-4">
+            <nav id="breadcrumbContainer" class="flex items-center flex-wrap gap-2 text-sm sm:text-base font-bold text-slate-800">
+              <span class="breadcrumb-crumb active">
+                <i class="fa-solid fa-house-chimney icon-python"></i> working
+              </span>
+            </nav>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
-            <button class="btn-tool" onclick="App.promptDownloadUrl()" title="Tải mô hình hoặc dữ liệu trực tiếp từ URL" data-i18n-title="upload_url_title">
-              <i class="fa-solid fa-link text-indigo-600"></i>
-              <span data-i18n="upload_url">Tải từ liên kết (URL)</span>
-            </button>
-            <button class="btn-tool" onclick="document.getElementById('fileInput').click()" title="Tải tệp từ máy lên Kaggle" data-i18n-title="upload_file_title">
-              <i class="fa-solid fa-cloud-arrow-up text-brand-600"></i>
-              <span data-i18n="upload_file">Tải tệp lên</span>
-            </button>
-            <button class="btn-tool" onclick="document.getElementById('folderInput').click()" title="Upload folder" data-i18n-title="upload_folder">
-              <i class="fa-solid fa-folder-open text-amber-500"></i>
-              <span data-i18n="upload_folder">Upload folder</span>
-            </button>
-            <button class="btn-tool" onclick="App.promptNewFolder()" title="Tạo thư mục mới" data-i18n-title="new_folder_title">
-              <i class="fa-solid fa-folder-plus text-amber-500"></i>
-              <span data-i18n="new_folder">Thư mục mới</span>
-            </button>
-            <button class="btn-tool" onclick="App.promptNewFile()" title="Tạo tệp văn bản / code mới" data-i18n-title="new_file_title">
-              <i class="fa-solid fa-file-circle-plus text-emerald-500"></i>
-              <span data-i18n="new_file">Tệp mới</span>
-            </button>
+          <!-- Action Toolbar -->
+          <div class="flex flex-wrap items-center justify-between gap-2.5 mb-5 pb-3 border-b border-slate-200/60">
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="btn-tool" onclick="App.goBack()" title="Lên thư mục cha">
+                <i class="fa-solid fa-arrow-left"></i>
+                <span data-i18n="go_back">Quay lại</span>
+              </button>
+              <button class="btn-tool" onclick="App.refreshCurrentDirectory()" title="Làm mới danh sách">
+                <i class="fa-solid fa-rotate"></i>
+                <span data-i18n="refresh">Làm mới</span>
+              </button>
+              <button class="btn-tool" onclick="App.downloadZip()" title="Nén thư mục hiện tại thành file .zip và tải về" data-i18n-title="download_folder_zip_title">
+                <i class="fa-solid fa-file-zipper text-brand-600"></i>
+                <span data-i18n="download_folder_zip">Tải thư mục (.ZIP)</span>
+              </button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="btn-tool" onclick="App.promptDownloadUrl()" title="Tải mô hình hoặc dữ liệu trực tiếp từ URL" data-i18n-title="upload_url_title">
+                <i class="fa-solid fa-link text-indigo-600"></i>
+                <span data-i18n="upload_url">Tải từ liên kết (URL)</span>
+              </button>
+              <button class="btn-tool" onclick="document.getElementById('fileInput').click()" title="Tải tệp từ máy lên Kaggle" data-i18n-title="upload_file_title">
+                <i class="fa-solid fa-cloud-arrow-up text-brand-600"></i>
+                <span data-i18n="upload_file">Tải tệp lên</span>
+              </button>
+              <button class="btn-tool" onclick="document.getElementById('folderInput').click()" title="Upload folder" data-i18n-title="upload_folder">
+                <i class="fa-solid fa-folder-open text-amber-500"></i>
+                <span data-i18n="upload_folder">Upload folder</span>
+              </button>
+              <button class="btn-tool" onclick="App.promptNewFolder()" title="Tạo thư mục mới" data-i18n-title="new_folder_title">
+                <i class="fa-solid fa-folder-plus text-amber-500"></i>
+                <span data-i18n="new_folder">Thư mục mới</span>
+              </button>
+              <button class="btn-tool" onclick="App.promptNewFile()" title="Tạo tệp văn bản / code mới" data-i18n-title="new_file_title">
+                <i class="fa-solid fa-file-circle-plus text-emerald-500"></i>
+                <span data-i18n="new_file">Tệp mới</span>
+              </button>
+            </div>
           </div>
+
         </div>
 
         <div id="fileClipboardBar" class="mb-3 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl items-center justify-between gap-3" style="display: none;">
