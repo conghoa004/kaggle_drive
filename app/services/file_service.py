@@ -158,33 +158,6 @@ def _is_regular_archive_file(path: Path) -> bool:
         return False
 
 
-def _directory_size_bytes(root: Path) -> Optional[int]:
-    """Return the total size of readable regular files without following links."""
-    if root.is_symlink() or _is_system_pseudo_path(root):
-        return None
-
-    total_bytes = 0
-    pending = [root]
-    while pending:
-        directory = pending.pop()
-        try:
-            with os.scandir(directory) as entries:
-                for entry in entries:
-                    if entry.is_symlink():
-                        continue
-                    entry_path = Path(entry.path)
-                    if _is_system_pseudo_path(entry_path):
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(entry_path)
-                    elif entry.is_file(follow_symlinks=False):
-                        total_bytes += entry.stat(follow_symlinks=False).st_size
-        except OSError:
-            return None
-
-    return total_bytes
-
-
 def _iter_archive_files(root: Path, cancel_event=None):
     """Yield visible regular files while pruning symlinks and virtual system trees."""
     check_cancelled(cancel_event)
@@ -359,7 +332,7 @@ class FileService:
                 is_dir = item.is_dir()
                 try:
                     stat = item.stat()
-                    size = _directory_size_bytes(item) if is_dir else stat.st_size
+                    size = stat.st_size if not is_dir else 0
                     mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
                 except OSError:
                     size = 0
@@ -375,7 +348,7 @@ class FileService:
                     "path": rel_item_path,
                     "is_dir": is_dir,
                     "size": size,
-                    "formatted_size": "—" if size is None else format_size(size),
+                    "formatted_size": "—" if is_dir else format_size(size),
                     "mtime": mtime,
                     "extension": ext.lower(),
                     "category": category,
