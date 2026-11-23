@@ -1691,7 +1691,6 @@ const App = {
     try {
       const properties = await API.getFileProperties(path);
       body.replaceChildren();
-      const numberFormat = new Intl.NumberFormat(I18n.currentLang || "vi");
       const rows = [
         { label: t("properties_name"), value: properties.name },
         { label: t("properties_type"), value: properties.is_dir ? t("folder_badge") : t("file_badge") },
@@ -1699,10 +1698,6 @@ const App = {
         ...(properties.extension ? [{ label: t("properties_extension"), value: `.${properties.extension}` }] : []),
         ...(properties.mime_type ? [{ label: t("properties_mime"), value: properties.mime_type }] : []),
         { label: t("properties_size"), value: properties.formatted_size },
-        ...(properties.is_dir ? [{
-          label: t("properties_contents"),
-          value: `${numberFormat.format(properties.files_count)} ${t("properties_files")}, ${numberFormat.format(properties.folders_count)} ${t("properties_folders")}`
-        }] : []),
         { label: t("properties_created"), value: properties.created_at || "-" },
         { label: t("properties_modified"), value: properties.modified_at || "-" },
         { label: t("properties_permissions"), value: properties.permissions || "-" }
