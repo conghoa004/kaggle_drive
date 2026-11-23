@@ -650,10 +650,6 @@ class FileService:
         """Delete a file or recursively delete a directory."""
         target = get_safe_path_entry(rel_path, must_exist=True)
 
-        # Prevent deleting ROOT_DIR itself
-        if not target.is_symlink() and target.resolve() == get_root_dir().resolve():
-            raise HTTPException(status_code=403, detail="Không thể xóa thư mục gốc!")
-
         def remove_path(path: Path) -> None:
             check_cancelled(cancel_event)
             if path.is_symlink() or not path.is_dir():
