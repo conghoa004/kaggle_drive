@@ -105,7 +105,7 @@ const Uploader = {
     return error;
   },
 
-  async uploadFilesList(files, overwrite = false) {
+  async uploadFilesList(files) {
     if (!files.length) return;
     if (this.isUploading) {
       UI.toast(t("upload_busy"), "warning");
@@ -118,79 +118,154 @@ const Uploader = {
     const progressBar = document.getElementById("uploadProgressBar");
     const progressText = document.getElementById("uploadProgressText");
     const fileListText = document.getElementById("uploadFileListText");
-    if (progressBar) progressBar.style.width = "0%";
-    if (progressText) progressText.textContent = "0%";
-    if (fileListText) fileListText.textContent = t("upload_preparing", { count: files.length });
+    const overwritePaths = new Set();
+    const skipPaths = new Set();
+    const normalizePath = path => String(path || "")
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter(part => part && part !== ".")
+      .join("/");
+    const destinationFor = relativePath => normalizePath(
+      [AppState.currentPath, relativePath].filter(Boolean).join("/")
+    );
+    const relativePathFor = file => file.webkitRelativePath || file.name;
+    let uploadAttempted = false;
 
-    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    const chooseConflicts = async (paths, count = paths.length) => {
+      const normalized = [...new Set(paths.map(normalizePath).filter(Boolean))];
+      const pending = normalized.filter(path =>
+        !overwritePaths.has(path) && !skipPaths.has(path)
+      );
+      if (!pending.length) return true;
+
+      const knownCount = Math.max(
+        pending.length,
+        count - (normalized.length - pending.length)
+      );
+      const mode = await UI.chooseOverwriteMode(pending, knownCount);
+      if (mode === "all") {
+        pending.forEach(path => overwritePaths.add(path));
+        return true;
+      }
+      if (mode !== "review") return false;
+
+      for (const path of pending) {
+        const decision = await UI.confirmOverwriteFile(path);
+        if (decision === false) return false;
+        if (decision === "overwrite") overwritePaths.add(path);
+        else skipPaths.add(path);
+      }
+      return true;
+    };
+
     try {
-      if (!overwrite) {
-        const relativePaths = files.map(file => file.webkitRelativePath || file.name);
-        const result = await API.checkUploadConflicts(
-          AppState.currentPath,
-          relativePaths,
-          AppState.isServicesMode ? "services" : "storage"
+      if (progressBar) progressBar.style.width = "0%";
+      if (progressText) progressText.textContent = "0%";
+      if (fileListText) fileListText.textContent = t("upload_preparing", { count: files.length });
+
+      const fileScope = AppState.isServicesMode ? "services" : "storage";
+      const relativePaths = files.map(relativePathFor);
+      const initialCheck = await API.checkUploadConflicts(
+        AppState.currentPath, relativePaths, fileScope
+      );
+      if (initialCheck.conflicts && initialCheck.conflicts.length) {
+        const confirmed = await chooseConflicts(
+          initialCheck.conflicts, initialCheck.conflicts.length
         );
-        if (result.conflicts && result.conflicts.length) {
-          const confirmed = await UI.confirmOverwrite(result.conflicts, result.conflicts.length);
-          if (!confirmed) {
-            UI.closeModal("uploadModal");
-            return;
-          }
-          overwrite = true;
+        if (!confirmed) {
+          UI.closeModal("uploadModal");
+          return;
         }
       }
 
-      if (totalBytes > 80 * 1024 * 1024) {
-        await this.uploadFilesInChunks(files, totalBytes, progressBar, progressText, overwrite);
-      } else {
-        await this.uploadFilesMultipart(files, overwrite);
+      let retries = 0;
+      while (true) {
+        const uploadFiles = files.filter(file =>
+          !skipPaths.has(destinationFor(relativePathFor(file)))
+        );
+        if (!uploadFiles.length) {
+          UI.closeModal("uploadModal");
+          UI.toast(t("upload_success_skipped", {
+            uploaded: 0,
+            skipped: skipPaths.size
+          }), "success");
+          return;
+        }
+
+        const totalBytes = uploadFiles.reduce((sum, file) => sum + file.size, 0);
+        if (progressBar) progressBar.style.width = "0%";
+        if (progressText) progressText.textContent = "0%";
+        if (fileListText) {
+          fileListText.textContent = t("upload_preparing", { count: uploadFiles.length });
+        }
+
+        try {
+          uploadAttempted = true;
+          if (totalBytes > 80 * 1024 * 1024) {
+            await this.uploadFilesInChunks(
+              uploadFiles, totalBytes, progressBar, progressText, overwritePaths, skipPaths
+            );
+          } else {
+            await this.uploadFilesMultipart(uploadFiles, overwritePaths, skipPaths);
+          }
+          break;
+        } catch (error) {
+          const detail = error && error.data && error.data.detail;
+          if (error.status !== 409 || !detail || detail.code !== "overwrite_required") {
+            throw error;
+          }
+          if (++retries > 10) throw error;
+
+          const latest = await API.checkUploadConflicts(
+            AppState.currentPath,
+            uploadFiles.map(relativePathFor),
+            fileScope
+          );
+          const conflicts = [...new Set([
+            ...(detail.paths || []),
+            ...(latest.conflicts || [])
+          ])];
+          const conflictCount = Math.max(
+            detail.count || 0,
+            latest.conflicts ? latest.conflicts.length : 0,
+            conflicts.length
+          );
+          if (!await chooseConflicts(conflicts, conflictCount)) {
+            UI.closeModal("uploadModal");
+            if (uploadAttempted) App.loadDirectory(AppState.currentPath);
+            return;
+          }
+        }
       }
 
       setTimeout(() => UI.closeModal("uploadModal"), 600);
-      UI.toast(t("upload_success", { count: files.length }), "success");
+      if (skipPaths.size) {
+        UI.toast(t("upload_success_skipped", {
+          uploaded: files.length - skipPaths.size,
+          skipped: skipPaths.size
+        }), "success");
+      } else {
+        UI.toast(t("upload_success", { count: files.length }), "success");
+      }
       App.loadDirectory(AppState.currentPath);
       App.refreshSystemStats();
     } catch (error) {
-      const detail = error && error.data && error.data.detail;
-      if (!overwrite && error.status === 409 && detail && detail.code === "overwrite_required") {
-        const conflictPaths = new Set(detail.paths || []);
-        let conflictCount = detail.count || conflictPaths.size;
-        try {
-          const latest = await API.checkUploadConflicts(
-            AppState.currentPath,
-            files.map(file => file.webkitRelativePath || file.name),
-            AppState.isServicesMode ? "services" : "storage"
-          );
-          (latest.conflicts || []).forEach(path => conflictPaths.add(path));
-          conflictCount = Math.max(conflictCount, conflictPaths.size);
-        } catch (checkError) {
-          UI.closeModal("uploadModal");
-          UI.toast(checkError.message || t("upload_error"), "error");
-          throw checkError;
-        }
-        const confirmed = await UI.confirmOverwrite([...conflictPaths], conflictCount);
-        if (confirmed) {
-          UI.closeModal("uploadModal");
-          this.isUploading = false;
-          return await this.uploadFilesList(files, true);
-        }
-        UI.closeModal("uploadModal");
-        return;
-      }
       UI.closeModal("uploadModal");
       const errorMsg = error && error.message ? error.message : t("upload_error");
       UI.toast(errorMsg, "error");
+      if (uploadAttempted) App.loadDirectory(AppState.currentPath);
       throw error;
     } finally {
       this.isUploading = false;
     }
   },
 
-  uploadFilesMultipart(files, overwrite) {
+  uploadFilesMultipart(files, overwritePaths = new Set(), skipPaths = new Set()) {
     const formData = new FormData();
     formData.append("target_path", AppState.currentPath);
-    formData.append("overwrite", String(overwrite));
+    formData.append("overwrite", "false");
+    overwritePaths.forEach(path => formData.append("overwrite_paths", path));
+    skipPaths.forEach(path => formData.append("skip_paths", path));
     files.forEach(file => {
       formData.append("files", file);
       formData.append("relative_paths", file.webkitRelativePath || "");
@@ -222,7 +297,10 @@ const Uploader = {
     });
   },
 
-  async uploadFilesInChunks(files, totalBytes, progressBar, progressText, overwrite = false) {
+  async uploadFilesInChunks(
+    files, totalBytes, progressBar, progressText,
+    overwritePaths = new Set(), skipPaths = new Set()
+  ) {
     const chunkSize = 8 * 1024 * 1024;
     let completedBytes = 0;
 
@@ -246,10 +324,19 @@ const Uploader = {
         formData.append("offset", String(offset));
         formData.append("total_size", String(file.size));
         formData.append("batch_size", String(totalBytes));
-        formData.append("overwrite", String(overwrite));
+        const destination = [AppState.currentPath, file.webkitRelativePath || file.name]
+          .filter(Boolean)
+          .join("/")
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter(part => part && part !== ".")
+          .join("/");
+        formData.append("overwrite", String(overwritePaths.has(destination)));
+        overwritePaths.forEach(path => formData.append("overwrite_paths", path));
+        skipPaths.forEach(path => formData.append("skip_paths", path));
         formData.append("chunk", blob, "chunk.bin");
 
-        await new Promise((resolve, reject) => {
+        const chunkResult = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", API.withFileScope("/api/files/upload/chunk"), true);
           xhr.upload.onprogress = (event) => {
@@ -263,7 +350,11 @@ const Uploader = {
           };
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
+              try {
+                resolve(JSON.parse(xhr.responseText || "{}"));
+              } catch (_) {
+                resolve({});
+              }
               return;
             }
             reject(this.xhrError(xhr, "Upload failed (HTTP " + xhr.status + ")."));
@@ -272,6 +363,10 @@ const Uploader = {
           xhr.send(formData);
         });
 
+        if (chunkResult.status === "skipped") {
+          completedBytes += file.size - offset;
+          break;
+        }
         completedBytes += blob.size;
         offset = end;
       }

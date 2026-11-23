@@ -436,6 +436,8 @@ class FileService:
         relative_filename: Optional[str] = None,
         max_bytes: Optional[int] = None,
         overwrite: bool = False,
+        overwrite_paths: Optional[List[str]] = None,
+        skip_paths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Stream a bounded upload to a temporary file and atomically publish it."""
         base_folder = get_safe_path(target_folder_rel, must_exist=True)
@@ -449,7 +451,12 @@ class FileService:
                 status_code=409,
                 detail={"code": "path_conflict", "message": "An upload destination is an existing directory."},
             )
-        if dest_path.exists() and not overwrite:
+        relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+        if relative_dest in set(skip_paths or []):
+            upload_file.file.close()
+            return {"filename": dest_path.name, "path": relative_dest, "skipped": True}
+        overwrite_this = overwrite or relative_dest in set(overwrite_paths or [])
+        if dest_path.exists() and not overwrite_this:
             relative_path = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
             raise _overwrite_required([relative_path])
 
@@ -474,7 +481,7 @@ class FileService:
                         )
                     output.write(chunk)
                     bytes_written += len(chunk)
-            if overwrite:
+            if overwrite_this:
                 os.replace(temp_path, dest_path)
             else:
                 try:

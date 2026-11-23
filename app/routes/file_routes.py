@@ -206,6 +206,8 @@ def upload_files(
     files: List[UploadFile] = File(...),
     relative_paths: Optional[List[str]] = Form(None),
     overwrite: bool = Form(False),
+    overwrite_paths: Optional[List[str]] = Form(None),
+    skip_paths: Optional[List[str]] = Form(None),
 ):
     """Upload files with per-file and aggregate size limits."""
     require_auth(request)
@@ -227,9 +229,24 @@ def upload_files(
             else upload_file.filename or "uploaded_file"
             for idx, upload_file in enumerate(files)
         ]
+        approved_overwrites = set(overwrite_paths or [])
+        approved_skips = set(skip_paths or [])
+        if len(approved_overwrites) + len(approved_skips) > 1000:
+            raise HTTPException(status_code=413, detail="Too many per-file upload decisions.")
+        if any(
+            len(path.encode("utf-8")) > 4096
+            for path in approved_overwrites | approved_skips
+        ):
+            raise HTTPException(status_code=413, detail="An upload decision path is too long.")
         conflicts = FileService.get_upload_conflicts(target_path, filenames)
-        if conflicts and not overwrite:
-            raise _overwrite_required(conflicts)
+        unresolved = [
+            path for path in conflicts
+            if not overwrite
+            and path not in approved_overwrites
+            and path not in approved_skips
+        ]
+        if unresolved:
+            raise _overwrite_required(unresolved)
 
         for idx, upload_file in enumerate(files):
             rel_filename = filenames[idx]
@@ -239,16 +256,21 @@ def upload_files(
                 relative_filename=rel_filename,
                 max_bytes=file_sizes[idx],
                 overwrite=overwrite,
+                overwrite_paths=list(approved_overwrites),
+                skip_paths=list(approved_skips),
             )
             results.append(result)
     finally:
         for upload_file in files:
             if not upload_file.file.closed:
                 upload_file.file.close()
+    uploaded_files = [result for result in results if not result.get("skipped")]
+    skipped_files = [result for result in results if result.get("skipped")]
     return {
         "status": "success",
-        "message": f"\u0110\u00e3 t\u1ea3i l\u00ean th\u00e0nh c\u00f4ng {len(results)} t\u1ec7p.",
-        "uploaded_files": results
+        "message": f"\u0110\u00e3 t\u1ea3i l\u00ean th\u00e0nh c\u00f4ng {len(uploaded_files)} t\u1ec7p.",
+        "uploaded_files": uploaded_files,
+        "skipped_files": skipped_files,
     }
 
 
@@ -263,6 +285,8 @@ def upload_file_chunk(
     batch_size: int = Form(...),
     chunk: UploadFile = File(...),
     overwrite: bool = Form(False),
+    overwrite_paths: Optional[List[str]] = Form(None),
+    skip_paths: Optional[List[str]] = Form(None),
 ):
     """Append one bounded upload chunk and atomically publish the completed file."""
     require_auth(request)
@@ -303,7 +327,21 @@ def upload_file_chunk(
                 status_code=409,
                 detail={"code": "path_conflict", "message": "An upload destination is an existing directory."},
             )
-        if dest_path.exists() and not overwrite:
+        relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+        approved_skips = set(skip_paths or [])
+        approved_overwrites = set(overwrite_paths or [])
+        if len(approved_skips) + len(approved_overwrites) > 1000:
+            raise HTTPException(status_code=413, detail="Too many per-file upload decisions.")
+        if any(
+            len(path.encode("utf-8")) > 4096
+            for path in approved_skips | approved_overwrites
+        ):
+            raise HTTPException(status_code=413, detail="An upload decision path is too long.")
+        if relative_dest in approved_skips:
+            chunk_path.unlink(missing_ok=True)
+            return {"status": "skipped", "path": relative_dest}
+        overwrite_this = overwrite or relative_dest in approved_overwrites
+        if dest_path.exists() and not overwrite_this:
             chunk_path.unlink(missing_ok=True)
             relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
             raise _overwrite_required([relative_dest])
@@ -327,7 +365,7 @@ def upload_file_chunk(
 
         received = offset + len(data)
         if received == total_size:
-            if overwrite:
+            if overwrite_this:
                 chunk_path.replace(dest_path)
             else:
                 try:

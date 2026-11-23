@@ -219,6 +219,7 @@ const I18n = {
       uploading_title: "Đang tải lên máy chủ...",
       upload_preparing: "Chuẩn bị tải lên {count} tệp...",
       upload_success: "Đã tải lên thành công {count} tệp!",
+      upload_success_skipped: "Đã tải {uploaded} tệp, bỏ qua {skipped} tệp trùng tên.",
       upload_busy: "Đang có tiến trình tải lên khác. Vui lòng chờ.",
       upload_error: "Lỗi kết nối khi tải lên.",
 
@@ -634,6 +635,7 @@ const I18n = {
       uploading_title: "Uploading to server...",
       upload_preparing: "Preparing to upload {count} file(s)...",
       upload_success: "Successfully uploaded {count} file(s)!",
+      upload_success_skipped: "Uploaded {uploaded} file(s), skipped {skipped} existing file(s).",
       upload_busy: "Another upload is already in progress. Please wait.",
       upload_error: "Connection error during upload.",
 
@@ -1049,6 +1051,7 @@ const I18n = {
       uploading_title: "正在上传到服务器...",
       upload_preparing: "正在准备上传 {count} 个文件...",
       upload_success: "成功上传 {count} 个文件！",
+      upload_success_skipped: "已上传 {uploaded} 个文件，跳过 {skipped} 个重名文件。",
       upload_busy: "已有文件正在上传中，请稍候。",
       upload_error: "上传时发生网络连接错误。",
 
