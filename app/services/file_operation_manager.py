@@ -12,6 +12,7 @@ from app.services.file_operation_context import OperationCancelledError
 
 MAX_ACTIVE_FILE_OPERATIONS = 8
 FILE_OPERATION_RETENTION_SECONDS = 15 * 60
+FILE_OPERATION_CLEANUP_INTERVAL_SECONDS = 60
 
 
 @dataclass
@@ -36,6 +37,8 @@ class FileOperationManager:
             max_workers=3, thread_name_prefix="file-operation"
         )
         self._executor_shutdown = False
+        self._cleanup_stop_event = threading.Event()
+        self._cleanup_thread: Optional[threading.Thread] = None
 
     def start(self, operation: str, payload: Dict[str, Any]) -> Dict[str, str]:
         with self._lock:
@@ -58,6 +61,7 @@ class FileOperationManager:
             operation_id = str(uuid.uuid4())
             item = _FileOperation(operation_id, operation, dict(payload))
             self._operations[operation_id] = item
+            self._ensure_cleanup_thread_locked()
             self._executor.submit(self._run, operation_id)
             return {"operation_id": operation_id, "status": item.status}
 
@@ -97,15 +101,45 @@ class FileOperationManager:
 
     def shutdown(self) -> None:
         with self._lock:
+            self._cleanup_stop_event.set()
+            cleanup_thread = self._cleanup_thread
+            self._cleanup_thread = None
             for item in self._operations.values():
                 if item.status in {"queued", "running", "cancelling"}:
                     item.cancel_event.set()
                 if item.archive_file is not None:
-                    item.archive_file.close()
+                    try:
+                        item.archive_file.close()
+                    except Exception:
+                        pass
                     item.archive_file = None
             executor = self._executor
             self._executor_shutdown = True
         executor.shutdown(wait=True, cancel_futures=False)
+        if cleanup_thread is not None and cleanup_thread is not threading.current_thread():
+            cleanup_thread.join(timeout=FILE_OPERATION_CLEANUP_INTERVAL_SECONDS + 1)
+
+    def _ensure_cleanup_thread_locked(self) -> None:
+        if (
+            self._cleanup_thread is not None
+            and self._cleanup_thread.is_alive()
+            and not self._cleanup_stop_event.is_set()
+        ):
+            return
+
+        self._cleanup_stop_event = threading.Event()
+        self._cleanup_thread = threading.Thread(
+            target=self._cleanup_loop,
+            args=(self._cleanup_stop_event,),
+            name="file-operation-cleanup",
+            daemon=True,
+        )
+        self._cleanup_thread.start()
+
+    def _cleanup_loop(self, stop_event: threading.Event) -> None:
+        while not stop_event.wait(FILE_OPERATION_CLEANUP_INTERVAL_SECONDS):
+            with self._lock:
+                self._prune_locked()
 
     def _run(self, operation_id: str) -> None:
         with self._lock:
@@ -206,7 +240,11 @@ class FileOperationManager:
                 and now - item.updated_at > FILE_OPERATION_RETENTION_SECONDS
             ):
                 if item.archive_file is not None:
-                    item.archive_file.close()
+                    try:
+                        item.archive_file.close()
+                    except Exception:
+                        pass
+                    item.archive_file = None
                 self._operations.pop(operation_id, None)
 
     @staticmethod
