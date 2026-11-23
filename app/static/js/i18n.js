@@ -14,6 +14,7 @@ const I18n = {
 
   translations: {
     vi: {
+      delete_in_progress: "\u0110ang x\u00f3a t\u1ec7p v\u00e0 th\u01b0 m\u1ee5c...",
       // General
       app_name: "Kaggle Cloud Drive",
       app_subtitle: "Hệ thống quản lý tệp trực quan cho Kaggle Notebook",
@@ -371,6 +372,7 @@ const I18n = {
     },
 
     en: {
+      delete_in_progress: "Deleting files and folders...",
       // General
       app_name: "Kaggle Cloud Drive",
       app_subtitle: "Visual File Management System for Kaggle Notebooks",
@@ -728,6 +730,7 @@ const I18n = {
     },
 
     zh: {
+      delete_in_progress: "\u6b63\u5728\u5220\u9664\u6587\u4ef6\u548c\u6587\u4ef6\u5939...",
       // General
       app_name: "Kaggle Cloud Drive",
       app_subtitle: "适用于 Kaggle Notebook 的可视化文件管理系统",

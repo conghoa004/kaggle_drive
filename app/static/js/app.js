@@ -1443,21 +1443,47 @@ const App = {
   async confirmDelete(items) {
     if (!Array.isArray(items) || !items.length) return;
     let successCount = 0;
+    const taskId = UI.startBackgroundTask(
+      t("delete_in_progress"),
+      t("clipboard_operation_progress", {
+        current: 0,
+        total: items.length,
+        name: ""
+      }),
+      0
+    );
 
-    for (const itemPath of items) {
-      try {
-        await API.deleteItem(itemPath);
-        successCount++;
-      } catch (err) {
-        UI.toast(`${t("error")} (${itemPath}): ${err.message}`, "error");
+    try {
+      for (let index = 0; index < items.length; index++) {
+        const itemPath = items[index];
+        const name = itemPath.split("/").pop() || itemPath;
+        UI.updateBackgroundTask(taskId, {
+          detail: t("clipboard_operation_progress", {
+            current: index + 1,
+            total: items.length,
+            name
+          }),
+          progress: (index / items.length) * 100
+        });
+        try {
+          await API.deleteItem(itemPath);
+          successCount++;
+        } catch (err) {
+          UI.toast(`${t("error")} (${itemPath}): ${err.message}`, "error");
+        }
+        UI.updateBackgroundTask(taskId, {
+          progress: ((index + 1) / items.length) * 100
+        });
       }
-    }
 
-    if (successCount > 0) {
-      UI.toast(t("delete_success_toast", { count: successCount }), "success");
-      AppState.selectedItems.clear();
-      this.loadDirectory(AppState.currentPath, false);
-      this.refreshSystemStats();
+      if (successCount > 0) {
+        UI.toast(t("delete_success_toast", { count: successCount }), "success");
+        AppState.selectedItems.clear();
+        this.loadDirectory(AppState.currentPath, false);
+        this.refreshSystemStats();
+      }
+    } finally {
+      UI.finishBackgroundTask(taskId);
     }
   },
 
