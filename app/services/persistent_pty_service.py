@@ -81,6 +81,19 @@ class PtyTerminalService:
             session = None
 
         if session is None:
+            while len(_TERMINAL_SESSIONS) >= MAX_TERMINAL_SESSIONS:
+                # Keep exited sessions briefly for reconnect/history replay, but
+                # evict the oldest detached one when a new shell needs a slot.
+                expired_candidates = [
+                    item
+                    for item in _TERMINAL_SESSIONS.values()
+                    if item.exited and item.websocket is None
+                ]
+                if not expired_candidates:
+                    break
+                oldest = min(expired_candidates, key=lambda item: item.created_at)
+                await PtyTerminalService._terminate_session(oldest)
+
             if len(_TERMINAL_SESSIONS) >= MAX_TERMINAL_SESSIONS:
                 await websocket.accept()
                 await websocket.send_json({

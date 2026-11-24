@@ -232,6 +232,55 @@ def _remove_owned_path(path: Path, identity) -> None:
         pass
 
 
+def _remove_owned_empty_directory(path: Path, identity) -> None:
+    """Remove only our still-empty directory reservation."""
+    if identity is None:
+        return
+    try:
+        metadata = path.lstat()
+        if (
+            (metadata.st_dev, metadata.st_ino) == identity
+            and stat_module.S_ISDIR(metadata.st_mode)
+        ):
+            path.rmdir()
+    except OSError:
+        pass
+
+
+def _rename_without_overwrite(source: Path, destination: Path) -> None:
+    """Rename an entry without replacing a path created concurrently."""
+    if source.is_symlink() and os.name != "nt":
+        os.symlink(
+            os.readlink(source),
+            destination,
+            target_is_directory=source.is_dir(),
+        )
+        source.unlink()
+        return
+
+    if source.is_dir() and not source.is_symlink():
+        reservation_identity = None
+        try:
+            destination.mkdir()
+            reservation_identity = _path_identity(destination)
+            if os.name == "nt":
+                destination.rmdir()
+                reservation_identity = None
+            source.rename(destination)
+        except Exception:
+            _remove_owned_empty_directory(destination, reservation_identity)
+            raise
+        return
+
+    if os.name == "nt":
+        # Windows os.rename fails atomically if the destination exists.
+        source.rename(destination)
+    else:
+        # Same-filesystem hard links claim a new name atomically on POSIX.
+        os.link(source, destination, follow_symlinks=False)
+        source.unlink()
+
+
 def _is_regular_archive_file(path: Path) -> bool:
     if path.is_symlink():
         return False
@@ -802,8 +851,10 @@ class FileService:
             raise HTTPException(status_code=400, detail="Tên mới đã tồn tại.")
 
         try:
-            target.rename(new_target)
+            _rename_without_overwrite(target, new_target)
         except Exception as e:
+            if isinstance(e, FileExistsError):
+                raise HTTPException(status_code=409, detail="The new name already exists.") from e
             raise HTTPException(status_code=500, detail=f"Lỗi đổi tên: {str(e)}")
 
         new_rel_path = str(new_target.relative_to(get_root_dir())).replace("\\", "/")
@@ -1032,7 +1083,7 @@ class FileService:
         if target.is_symlink():
             raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
         archive = tempfile.SpooledTemporaryFile(
-            max_size=8 * 1024 * 1024, mode="w+b", dir=get_root_dir(), prefix=".zip-spool-"
+            max_size=8 * 1024 * 1024, mode="w+b", prefix=".zip-spool-"
         )
         entries = 0
         total_bytes = 0
@@ -1739,7 +1790,7 @@ class FileService:
             raise HTTPException(status_code=400, detail="No items were selected.")
         targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
         archive = tempfile.SpooledTemporaryFile(
-            max_size=8 * 1024 * 1024, mode="w+b", dir=get_root_dir(), prefix=".zip-spool-"
+            max_size=8 * 1024 * 1024, mode="w+b", prefix=".zip-spool-"
         )
         entries = 0
         total_bytes = 0
