@@ -285,16 +285,12 @@ const Uploader = {
 
         try {
           uploadAttempted = true;
-          if (totalBytes > 80 * 1024 * 1024) {
-            await this.uploadFilesInChunks(
-              uploadFiles, totalBytes, progressBar, progressText,
-              overwritePaths, skipPaths, targetPath
-            );
-          } else {
-            await this.uploadFilesMultipart(
-              uploadFiles, overwritePaths, skipPaths, targetPath
-            );
-          }
+          // Chunk requests have server-side cancellation. A single multipart
+          // request could keep saving after the browser aborts its XHR.
+          await this.uploadFilesInChunks(
+            uploadFiles, totalBytes, progressBar, progressText,
+            overwritePaths, skipPaths, targetPath
+          );
           this.throwIfCancelled();
           break;
         } catch (error) {

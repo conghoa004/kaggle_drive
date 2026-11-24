@@ -5,6 +5,7 @@ import os
 import re
 import time
 import base64
+import errno
 import shutil
 import socket
 import stat as stat_module
@@ -210,6 +211,27 @@ def _validate_file_operation_tree(root: Path) -> None:
             raise HTTPException(status_code=403, detail=f"Could not inspect directory: {exc}")
 
 
+def _path_identity(path: Path):
+    metadata = path.lstat()
+    return metadata.st_dev, metadata.st_ino
+
+
+def _remove_owned_path(path: Path, identity) -> None:
+    """Remove a partial destination only while it is still the entry we created."""
+    if identity is None:
+        return
+    try:
+        metadata = path.lstat()
+        if (metadata.st_dev, metadata.st_ino) != identity:
+            return
+        if stat_module.S_ISDIR(metadata.st_mode):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _is_regular_archive_file(path: Path) -> bool:
     if path.is_symlink():
         return False
@@ -373,6 +395,10 @@ class FileService:
     @staticmethod
     def is_upload_chunk_cancelled(upload_id: str) -> bool:
         return _is_upload_chunk_cancelled(upload_id)
+
+    @staticmethod
+    def mark_upload_chunk_cancelled(upload_id: str) -> None:
+        _mark_upload_chunk_cancelled(upload_id)
 
     @staticmethod
     def cancel_upload_chunks(target_folder_rel: str, uploads: List[Dict[str, str]]) -> int:
@@ -823,43 +849,55 @@ class FileService:
                 dest_item = dest_folder / name
                 counter += 1
 
+        destination_identity = None
+
         def copy_file(source_path: str, destination_path: str) -> str:
+            nonlocal destination_identity
             check_cancelled(cancel_event)
             source_file = Path(source_path)
             destination_file = Path(destination_path)
-            with source_file.open("rb") as source_stream, destination_file.open("xb") as destination_stream:
-                while True:
-                    check_cancelled(cancel_event)
-                    chunk = source_stream.read(settings.CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    destination_stream.write(chunk)
+            with source_file.open("rb") as source_stream:
+                with destination_file.open("xb") as destination_stream:
+                    if destination_file == dest_item:
+                        metadata = os.fstat(destination_stream.fileno())
+                        destination_identity = (metadata.st_dev, metadata.st_ino)
+                    while True:
+                        check_cancelled(cancel_event)
+                        chunk = source_stream.read(settings.CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        destination_stream.write(chunk)
             check_cancelled(cancel_event)
             shutil.copystat(source_file, destination_file)
             return str(destination_file)
 
         try:
             if source.is_dir():
+                # Claim the destination atomically before copying so a failed
+                # concurrent copy cannot mistake somebody else's directory for ours.
+                dest_item.mkdir()
+                destination_identity = _path_identity(dest_item)
                 shutil.copytree(
                     source,
                     dest_item,
                     symlinks=True,
                     copy_function=copy_file,
+                    dirs_exist_ok=True,
                 )
             else:
                 copy_file(str(source), str(dest_item))
             check_cancelled(cancel_event)
         except OperationCancelledError:
-            if dest_item.is_dir() and not dest_item.is_symlink():
-                shutil.rmtree(dest_item, ignore_errors=True)
-            elif dest_item.exists() or dest_item.is_symlink():
-                dest_item.unlink(missing_ok=True)
+            _remove_owned_path(dest_item, destination_identity)
             raise
+        except FileExistsError as exc:
+            _remove_owned_path(dest_item, destination_identity)
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{dest_item.name}' already exists in the destination.",
+            ) from exc
         except Exception as exc:
-            if dest_item.is_dir() and not dest_item.is_symlink():
-                shutil.rmtree(dest_item, ignore_errors=True)
-            elif dest_item.exists() or dest_item.is_symlink():
-                dest_item.unlink(missing_ok=True)
+            _remove_owned_path(dest_item, destination_identity)
             raise HTTPException(status_code=500, detail=f"Could not copy item: {exc}")
 
         return {"status": "success", "message": f"Copied to '{dest_item.name}'"}
@@ -895,39 +933,93 @@ class FileService:
             )
         check_cancelled(cancel_event)
 
+        destination_identity = None
+        destination_committed = False
+
         def copy_move_file(source_path: str, destination_path: str) -> str:
-            """Make shutil.move's cross-filesystem copy phase cancellable."""
+            """Copy a file in cancellable chunks without overwriting the destination."""
+            nonlocal destination_identity
             check_cancelled(cancel_event)
             source_file = Path(source_path)
             destination_file = Path(destination_path)
-            with source_file.open("rb") as source_stream, destination_file.open("xb") as destination_stream:
-                while True:
-                    check_cancelled(cancel_event)
-                    chunk = source_stream.read(settings.CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    destination_stream.write(chunk)
+            with source_file.open("rb") as source_stream:
+                with destination_file.open("xb") as destination_stream:
+                    if destination_file == dest_item:
+                        metadata = os.fstat(destination_stream.fileno())
+                        destination_identity = (metadata.st_dev, metadata.st_ino)
+                    elif destination_identity is None and dest_item.is_dir():
+                        destination_identity = _path_identity(dest_item)
+                    while True:
+                        check_cancelled(cancel_event)
+                        chunk = source_stream.read(settings.CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        destination_stream.write(chunk)
             check_cancelled(cancel_event)
             shutil.copystat(source_file, destination_file)
             return str(destination_file)
 
         try:
-            shutil.move(
-                str(source), str(dest_item), copy_function=copy_move_file
-            )
+            if source.is_symlink():
+                os.symlink(os.readlink(source), dest_item, target_is_directory=source.is_dir())
+                destination_identity = _path_identity(dest_item)
+                check_cancelled(cancel_event)
+                destination_committed = True
+                source.unlink()
+            elif source.is_dir():
+                # Reserve the name first. On POSIX, rename replaces this empty
+                # directory atomically; on another filesystem, copy into it.
+                dest_item.mkdir()
+                destination_identity = _path_identity(dest_item)
+                check_cancelled(cancel_event)
+                try:
+                    os.rename(source, dest_item)
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV and os.name != "nt":
+                        raise
+                    shutil.copytree(
+                        source,
+                        dest_item,
+                        symlinks=True,
+                        copy_function=copy_move_file,
+                        dirs_exist_ok=True,
+                    )
+                    check_cancelled(cancel_event)
+                    destination_committed = True
+                    shutil.rmtree(source)
+            else:
+                try:
+                    os.link(source, dest_item, follow_symlinks=False)
+                except FileExistsError:
+                    raise
+                except OSError as exc:
+                    if exc.errno not in {
+                        errno.EXDEV,
+                        errno.EPERM,
+                        getattr(errno, "EOPNOTSUPP", errno.EPERM),
+                        getattr(errno, "ENOTSUP", errno.EPERM),
+                    }:
+                        raise
+                    copy_move_file(str(source), str(dest_item))
+                else:
+                    destination_identity = _path_identity(dest_item)
+                check_cancelled(cancel_event)
+                destination_committed = True
+                source.unlink()
         except OperationCancelledError:
-            # shutil.move does not remove the source until its cross-device copy
-            # succeeds, so removing this partial destination leaves the source intact.
-            if dest_item.is_dir() and not dest_item.is_symlink():
-                shutil.rmtree(dest_item, ignore_errors=True)
-            elif dest_item.exists() or dest_item.is_symlink():
-                dest_item.unlink(missing_ok=True)
+            if not destination_committed:
+                _remove_owned_path(dest_item, destination_identity)
             raise
+        except FileExistsError as exc:
+            if not destination_committed:
+                _remove_owned_path(dest_item, destination_identity)
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{source.name}' already exists in the destination.",
+            ) from exc
         except Exception as exc:
-            if dest_item.is_dir() and not dest_item.is_symlink():
-                shutil.rmtree(dest_item, ignore_errors=True)
-            elif dest_item.exists() or dest_item.is_symlink():
-                dest_item.unlink(missing_ok=True)
+            if not destination_committed:
+                _remove_owned_path(dest_item, destination_identity)
             raise HTTPException(status_code=500, detail=f"Could not move item: {exc}")
 
         return {"status": "success", "message": f"Moved '{source.name}'"}
@@ -1741,12 +1833,12 @@ class FileService:
             name += ".zip"
 
         dest = dest_dir / name
-        if dest.exists():
+        if dest.exists() or dest.is_symlink():
             if requested_name:
                 raise HTTPException(status_code=409, detail="An archive with that name already exists.")
             stem = dest.stem
             counter = 1
-            while dest.exists():
+            while dest.exists() or dest.is_symlink():
                 dest = dest_dir / f"{stem}_{counter}.zip"
                 counter += 1
         try:
@@ -1830,7 +1922,17 @@ class FileService:
             if not entry_count:
                 raise HTTPException(status_code=400, detail="No files were available to archive.")
             check_cancelled(cancel_event)
-            os.replace(temp_path, dest)
+            try:
+                # The temporary ZIP is in the destination directory, so a hard
+                # link publishes it atomically and fails if another request won.
+                os.link(temp_path, dest)
+            except FileExistsError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="An archive with that name already exists.",
+                ) from exc
+            temp_path.unlink()
+            temp_path = None
         except Exception as exc:
             if temp_path:
                 temp_path.unlink(missing_ok=True)

@@ -1,5 +1,8 @@
 import mimetypes
 import os
+import inspect
+import threading
+from functools import wraps
 from urllib.parse import quote
 from typing import List, Literal, Optional
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, Query
@@ -13,6 +16,27 @@ from app.services.file_service import FileService, MEDIA_MIMETYPES, MAX_EXTRACT_
 from app.services.file_operation_manager import file_operation_manager
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+_UPLOAD_CHUNK_LOCKS = tuple(threading.Lock() for _ in range(64))
+
+
+def _upload_chunk_lock(upload_id: str):
+    return _UPLOAD_CHUNK_LOCKS[hash(upload_id) % len(_UPLOAD_CHUNK_LOCKS)]
+
+
+def _serialize_upload_chunk(function):
+    upload_id_index = list(inspect.signature(function).parameters).index("upload_id")
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        upload_id = kwargs.get("upload_id")
+        if upload_id is None and upload_id_index < len(args):
+            upload_id = args[upload_id_index]
+        if not upload_id:
+            return function(*args, **kwargs)
+        with _upload_chunk_lock(upload_id):
+            return function(*args, **kwargs)
+
+    return wrapped
 
 
 def _archive_chunks(archive_file):
@@ -233,7 +257,14 @@ def cancel_upload_chunks(request: Request, payload: UploadCancelRequest):
             raise HTTPException(status_code=400, detail="Invalid upload ID.")
         uploads.append(item.dict())
 
-    removed = FileService.cancel_upload_chunks(payload.target_path, uploads)
+    removed = 0
+    # Signal cancellation before waiting for an in-flight chunk request to
+    # release its lock, so that request can stop before publishing the file.
+    for upload in uploads:
+        FileService.mark_upload_chunk_cancelled(upload["upload_id"])
+    for upload in uploads:
+        with _upload_chunk_lock(upload["upload_id"]):
+            removed += FileService.cancel_upload_chunks(payload.target_path, [upload])
     return {"status": "cancelled", "removed_chunks": removed}
 
 
@@ -313,6 +344,7 @@ def upload_files(
 
 
 @router.post("/upload/chunk")
+@_serialize_upload_chunk
 def upload_file_chunk(
     request: Request,
     target_path: str = Form(""),

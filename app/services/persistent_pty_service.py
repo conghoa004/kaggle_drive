@@ -264,6 +264,11 @@ class PtyTerminalService:
                 await websocket.send_json({"type": "exit"})
                 return
             await websocket.send_bytes(chunk)
+            # EOF can arrive while the bounded queue is full, leaving no room
+            # for the sentinel. Once buffered output drains, send the exit event.
+            if session.exited and queue.empty():
+                await websocket.send_json({"type": "exit"})
+                return
             if session.reader_paused and not queue.full():
                 PtyTerminalService._resume_reader(session)
 
