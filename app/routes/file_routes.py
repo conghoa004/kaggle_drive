@@ -65,6 +65,8 @@ def _overwrite_required(paths: List[str]) -> HTTPException:
 class ContentSaveRequest(BaseModel):
     path: str = Field(..., max_length=4096)
     content: str = Field(..., max_length=settings.MAX_TEXT_PREVIEW_SIZE)
+    encoding: Literal["utf-8", "latin-1"] = "utf-8"
+    newline: Literal["\n", "\r\n", "\r"] = "\n"
 
 
 class BinarySaveRequest(BaseModel):
@@ -224,7 +226,9 @@ def get_file_content(request: Request, path: str = Query(..., description="File 
 def save_file_content(request: Request, payload: ContentSaveRequest):
     """Save edited content to a text file."""
     require_auth(request)
-    return FileService.write_text_file(payload.path, payload.content)
+    return FileService.write_text_file(
+        payload.path, payload.content, payload.encoding, payload.newline
+    )
 
 
 @router.post("/save-binary")

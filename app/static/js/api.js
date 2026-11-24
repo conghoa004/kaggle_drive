@@ -70,10 +70,10 @@ const API = {
     return this.request("/api/files/content?path=" + encodeURIComponent(path));
   },
 
-  saveFileContent(path, content) {
+  saveFileContent(path, content, encoding = "utf-8", newline = "\n") {
     return this.request("/api/files/content", {
       method: "POST",
-      body: JSON.stringify({ path, content })
+      body: JSON.stringify({ path, content, encoding, newline })
     });
   },
 

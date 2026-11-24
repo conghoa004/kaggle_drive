@@ -4,6 +4,8 @@
 
 const Editor = {
   currentFilePath: null,
+  currentFileEncoding: "utf-8",
+  currentFileNewline: "\n",
   isDirty: false,
   aceInstance: null,
   fontSize: 14,
@@ -153,6 +155,8 @@ const Editor = {
       const data = await API.getFileContent(path);
 
       this.currentFilePath = data.path;
+      this.currentFileEncoding = data.encoding || "utf-8";
+      this.currentFileNewline = data.newline || "\n";
 
       const titleEl = document.getElementById("editorFileName");
       if (titleEl) titleEl.textContent = data.name;
@@ -167,6 +171,9 @@ const Editor = {
 
       if (this.aceInstance) {
         this.aceInstance.session.setMode(this.getAceMode(ext));
+        this.aceInstance.session.setNewLineMode(
+          this.currentFileNewline === "\r\n" ? "windows" : "unix"
+        );
         this.aceInstance.setValue(data.content || "", -1);
         this.aceInstance.clearSelection();
       } else {
@@ -298,7 +305,12 @@ const Editor = {
     }
 
     try {
-      await API.saveFileContent(this.currentFilePath, content);
+      await API.saveFileContent(
+        this.currentFilePath,
+        content,
+        this.currentFileEncoding,
+        this.currentFileNewline
+      );
       this.setDirty(false);
       UI.toast(t("editor_saved_toast"), "success");
       App.loadDirectory(AppState.currentPath, false);
@@ -361,6 +373,8 @@ const Editor = {
 
   doClose() {
     this.currentFilePath = null;
+    this.currentFileEncoding = "utf-8";
+    this.currentFileNewline = "\n";
     this.isDirty = false;
     const modal = document.getElementById("editorModal");
     if (modal) modal.classList.remove("show");

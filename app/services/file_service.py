@@ -569,18 +569,38 @@ class FileService:
                 detail=f"Tệp quá lớn ({format_size(file_size)}) để mở trong trình chỉnh sửa web (tối đa 10MB)."
             )
 
+        try:
+            raw_content = file_path.read_bytes()
+            if b"\x00" in raw_content:
+                raise HTTPException(status_code=400, detail="Binary files cannot be edited as text.")
+        except HTTPException:
+            raise
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read file: {exc}")
+
+        crlf_count = raw_content.count(b"\r\n")
+        content_without_crlf = raw_content.replace(b"\r\n", b"")
+        lf_count = content_without_crlf.count(b"\n")
+        cr_count = content_without_crlf.count(b"\r")
+        newline = max(
+            ((crlf_count, "\r\n"), (lf_count, "\n"), (cr_count, "\r")),
+            key=lambda item: item[0],
+        )[1]
+        if crlf_count == 0 and lf_count == 0 and cr_count == 0:
+            newline = "\n"
+
         # Attempt UTF-8 then fallback to Latin-1
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
+            content = raw_content.decode("utf-8")
             encoding = "utf-8"
         except UnicodeDecodeError:
             try:
-                with open(file_path, "r", encoding="latin-1") as f:
-                    content = f.read()
+                content = raw_content.decode("latin-1")
                 encoding = "latin-1"
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Không thể đọc mã hóa của tệp: {str(e)}")
+
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
 
         ext = file_path.suffix.lstrip(".").lower()
         return {
@@ -590,14 +610,33 @@ class FileService:
             "size": file_size,
             "extension": ext,
             "encoding": encoding,
+            "newline": newline,
             "category": get_file_category(ext)
         }
 
     @staticmethod
-    def write_text_file(rel_path: str, content: str) -> Dict[str, Any]:
+    def write_text_file(
+        rel_path: str,
+        content: str,
+        encoding: str = "utf-8",
+        newline: str = "\n",
+    ) -> Dict[str, Any]:
         """Save edited text atomically within the configured byte limit."""
         file_path = get_safe_path(rel_path, must_exist=False)
-        payload = content.encode("utf-8")
+        if encoding not in {"utf-8", "latin-1"}:
+            raise HTTPException(status_code=400, detail="Unsupported text encoding.")
+        if newline not in {"\n", "\r\n", "\r"}:
+            raise HTTPException(status_code=400, detail="Unsupported line ending format.")
+
+        normalized_content = content.replace("\r\n", "\n").replace("\r", "\n")
+        formatted_content = normalized_content.replace("\n", newline)
+        try:
+            payload = formatted_content.encode(encoding)
+        except UnicodeEncodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Content contains characters that cannot be saved using {encoding}.",
+            ) from exc
         if len(payload) > settings.MAX_TEXT_PREVIEW_SIZE:
             raise HTTPException(status_code=413, detail="Text content exceeds the configured size limit.")
 
