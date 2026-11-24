@@ -193,7 +193,6 @@ const Uploader = {
     const overwritePaths = new Set();
     const skipPaths = new Set();
     const normalizePath = path => String(path || "")
-      .replace(/\\/g, "/")
       .split("/")
       .filter(part => part && part !== ".")
       .join("/");
@@ -440,7 +439,6 @@ const Uploader = {
           const destination = [targetPath, uploadRecord.relative_path]
             .filter(Boolean)
             .join("/")
-            .replace(/\\/g, "/")
             .split("/")
             .filter(part => part && part !== ".")
             .join("/");

@@ -371,6 +371,11 @@ def format_size(bytes_num: int) -> str:
         return f"{bytes_num / (1024 * 1024 * 1024):.2f} GB"
 
 
+def _path_to_api(path: Path) -> str:
+    """Serialize native paths using slash separators without altering POSIX names."""
+    return path.as_posix()
+
+
 def get_file_category(extension: str) -> str:
     """Determine UI category for icon and previewer."""
     return EXTENSION_CATEGORIES.get(extension.lower(), "generic")
@@ -402,7 +407,9 @@ def _overwrite_required(paths: List[str], max_paths: int = 10) -> HTTPException:
 
 
 def _resolve_upload_destination(base_folder: Path, relative_filename: str) -> Path:
-    raw_name = (relative_filename or "").replace("\\", "/")
+    raw_name = relative_filename or ""
+    if os.name == "nt":
+        raw_name = raw_name.replace("\\", "/")
     parts = [part for part in raw_name.split("/") if part not in ("", ".")]
     if raw_name.startswith("/") or not parts or any(
         part == ".." or ":" in part for part in parts
@@ -498,7 +505,7 @@ class FileService:
                 ext = item.suffix.lstrip(".") if not is_dir else ""
                 category = "folder" if is_dir else get_file_category(ext)
 
-                rel_item_path = str(item.relative_to(get_root_dir())).replace("\\", "/")
+                rel_item_path = _path_to_api(item.relative_to(get_root_dir()))
 
                 items.append({
                     "name": item.name,
@@ -520,8 +527,8 @@ class FileService:
         items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
 
         # Determine parent path
-        clean_rel = (rel_path or "").replace("\\", "/").strip("/")
-        parent_path = str(Path(clean_rel).parent).replace("\\", "/") if clean_rel else None
+        clean_rel = Path(rel_path).as_posix().strip("/") if rel_path else ""
+        parent_path = Path(clean_rel).parent.as_posix() if clean_rel else None
         if parent_path == ".":
             parent_path = ""
 
@@ -657,7 +664,7 @@ class FileService:
                     },
                 )
             key = os.path.normcase(os.path.normpath(str(dest_path)))
-            relative_path = str(dest_path.relative_to(root)).replace("\\", "/")
+            relative_path = _path_to_api(dest_path.relative_to(root))
             if key in seen:
                 raise HTTPException(
                     status_code=409,
@@ -723,13 +730,13 @@ class FileService:
                 status_code=409,
                 detail={"code": "path_conflict", "message": "An upload destination is an existing directory."},
             )
-        relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+        relative_dest = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
         if relative_dest in set(skip_paths or []):
             upload_file.file.close()
             return {"filename": dest_path.name, "path": relative_dest, "skipped": True}
         overwrite_this = overwrite or relative_dest in set(overwrite_paths or [])
         if dest_path.exists() and not overwrite_this:
-            relative_path = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+            relative_path = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
             raise _overwrite_required([relative_path])
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -759,7 +766,7 @@ class FileService:
                 try:
                     os.link(temp_path, dest_path)
                 except FileExistsError:
-                    relative_path = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+                    relative_path = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
                     raise _overwrite_required([relative_path])
                 temp_path.unlink()
             temp_path = None
@@ -776,7 +783,7 @@ class FileService:
 
         return {
             "filename": dest_path.name,
-            "path": str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/"),
+            "path": _path_to_api(dest_path.relative_to(get_root_dir().resolve())),
             "size": bytes_written,
             "formatted_size": format_size(bytes_written),
         }
@@ -857,7 +864,7 @@ class FileService:
                 raise HTTPException(status_code=409, detail="The new name already exists.") from e
             raise HTTPException(status_code=500, detail=f"Lỗi đổi tên: {str(e)}")
 
-        new_rel_path = str(new_target.relative_to(get_root_dir())).replace("\\", "/")
+        new_rel_path = _path_to_api(new_target.relative_to(get_root_dir()))
         return {
             "status": "success",
             "message": f"Đã đổi tên thành '{clean_new_name}'",
@@ -1207,7 +1214,9 @@ class FileService:
         dest_root = validate_destination_root(dest_dir)
 
         def safe_member_path(member_name: str) -> Path:
-            normalized = str(member_name).replace("\\", "/")
+            normalized = str(member_name)
+            if os.name == "nt":
+                normalized = normalized.replace("\\", "/")
             if (
                 not normalized
                 or normalized.startswith("/")
@@ -1596,7 +1605,7 @@ class FileService:
         return {
             "status": "success",
             "message": message,
-            "destination": str(dest_dir.relative_to(get_root_dir())).replace("\\", "/"),
+            "destination": _path_to_api(dest_dir.relative_to(get_root_dir())),
             "skipped": skipped_count,
         }
 
@@ -1663,7 +1672,9 @@ class FileService:
         )
         if not filename or "." not in filename:
             filename = f"download_{int(time.time())}.bin"
-        filename = os.path.basename(filename.replace("\\", "/"))
+        if os.name == "nt":
+            filename = filename.replace("\\", "/")
+        filename = os.path.basename(filename)
         if filename in ("", ".", "..") or ":" in filename:
             raise HTTPException(status_code=400, detail="Invalid download filename.")
 
@@ -1791,7 +1802,7 @@ class FileService:
             "status": "success",
             "message": f"Downloaded '{filename}' ({format_size(bytes_downloaded)}).",
             "filename": filename,
-            "path": str(dest_path.relative_to(get_root_dir())).replace("\\", "/"),
+            "path": _path_to_api(dest_path.relative_to(get_root_dir())),
             "size": bytes_downloaded,
         }
 
@@ -1888,7 +1899,9 @@ class FileService:
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
 
         requested_name = archive_name.strip() if archive_name and archive_name.strip() else None
-        name = os.path.basename(requested_name.replace("\\", "/")) if requested_name else (
+        if requested_name and os.name == "nt":
+            requested_name = requested_name.replace("\\", "/")
+        name = os.path.basename(requested_name) if requested_name else (
             f"{first.stem}.zip" if len(targets) == 1 else "archive.zip"
         )
         if not name or name in (".", "..") or ":" in name:
@@ -2009,7 +2022,7 @@ class FileService:
             "status": "success",
             "message": f"Compressed {file_count} files into '{dest.name}'.",
             "archive_name": dest.name,
-            "archive_path": str(dest.relative_to(get_root_dir())).replace("\\", "/"),
+            "archive_path": _path_to_api(dest.relative_to(get_root_dir())),
             "size": size,
             "formatted_size": format_size(size),
         }

@@ -12,7 +12,9 @@ from pydantic import BaseModel, Field
 from app.config import settings
 
 from app.security import get_root_dir, require_auth, get_safe_path
-from app.services.file_service import FileService, MEDIA_MIMETYPES, MAX_EXTRACT_REVIEW_PATHS
+from app.services.file_service import (
+    FileService, MEDIA_MIMETYPES, MAX_EXTRACT_REVIEW_PATHS, _path_to_api,
+)
 from app.services.file_operation_manager import file_operation_manager
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -380,7 +382,9 @@ def upload_file_chunk(
     if not base_folder.is_dir():
         raise HTTPException(status_code=400, detail="Upload destination must be a directory.")
 
-    raw_name = relative_path.replace("\\", "/")
+    raw_name = relative_path
+    if os.name == "nt":
+        raw_name = raw_name.replace("\\", "/")
     parts = [part for part in raw_name.split("/") if part not in ("", ".")]
     if raw_name.startswith("/") or not parts or any(part == ".." or ":" in part for part in parts):
         raise HTTPException(status_code=400, detail="Invalid upload filename.")
@@ -399,7 +403,7 @@ def upload_file_chunk(
                 status_code=409,
                 detail={"code": "path_conflict", "message": "An upload destination is an existing directory."},
             )
-        relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+        relative_dest = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
         approved_skips = set(skip_paths or [])
         approved_overwrites = set(overwrite_paths or [])
         if len(approved_skips) + len(approved_overwrites) > 1000:
@@ -415,7 +419,7 @@ def upload_file_chunk(
         overwrite_this = overwrite or relative_dest in approved_overwrites
         if dest_path.exists() and not overwrite_this:
             chunk_path.unlink(missing_ok=True)
-            relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+            relative_dest = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
             raise _overwrite_required([relative_dest])
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -463,13 +467,13 @@ def upload_file_chunk(
                     os.link(chunk_path, dest_path)
                 except FileExistsError:
                     chunk_path.unlink(missing_ok=True)
-                    relative_dest = str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/")
+                    relative_dest = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
                     raise _overwrite_required([relative_dest])
                 chunk_path.unlink()
             return {
                 "status": "success",
                 "filename": dest_path.name,
-                "path": str(dest_path.relative_to(get_root_dir().resolve())).replace("\\", "/"),
+                "path": _path_to_api(dest_path.relative_to(get_root_dir().resolve())),
                 "size": received,
             }
         return {"status": "partial", "received": received}

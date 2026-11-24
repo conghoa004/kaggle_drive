@@ -316,7 +316,8 @@ const App = {
       portsPage.classList.add("hidden");
       portsPage.style.display = "none";
     }
-    const normalizedPath = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    const requestedPath = String(path || "");
+    const normalizedPath = requestedPath.split("/").filter(Boolean).join("/");
     this.setActiveNavigation("navStorage");
     AppState.currentPath = normalizedPath;
     AppState.storagePath = normalizedPath;
@@ -338,6 +339,17 @@ const App = {
       const data = await API.listFiles(path, AppState.showHidden);
       AppState.parentPath = data.parent_path;
       AppState.rootDir = data.root_dir || AppState.rootDir;
+      const canonicalPath = typeof data.current_path === "string"
+        ? data.current_path
+        : normalizedPath;
+      if (AppState.currentPath === normalizedPath) {
+        AppState.currentPath = canonicalPath;
+        AppState.storagePath = canonicalPath;
+        try {
+          localStorage.setItem("kaggle_drive_storage_path", canonicalPath);
+          localStorage.setItem("kaggle_drive_current_path", canonicalPath);
+        } catch (_) {}
+      }
       AppState.files = data.items || [];
       this.renderBreadcrumb();
       this.renderFiles();
@@ -848,7 +860,7 @@ const App = {
 
     if (this.clipboardPasteInProgress) return;
 
-    const targetPath = String(targetFolder || "").replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+    const targetPath = String(targetFolder || "").split("/").filter(Boolean).join("/");
     const pathsToPaste = clipboard.paths.filter(path => {
       if (clipboard.operation !== "cut") return true;
       const slash = path.lastIndexOf("/");
@@ -1955,9 +1967,16 @@ const App = {
 
   async copyFilePath(path) {
     this.hideContextMenu();
-    const root = (AppState.rootDir || "").replace(/\\/g, "/").replace(/\/+$/, "");
-    const relativePath = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-    const fullPath = `${root}/${relativePath}` || "/";
+    const configuredRoot = String(AppState.rootDir || "");
+    const windowsRoot = /^[a-z]:[\\/]/i.test(configuredRoot) || configuredRoot.startsWith("\\\\");
+    const separator = windowsRoot ? "\\" : "/";
+    const root = windowsRoot
+      ? configuredRoot.replace(/\//g, "\\").replace(/\\+$/, "")
+      : configuredRoot.replace(/\/+$/, "");
+    const relativePath = windowsRoot
+      ? String(path || "").replace(/\//g, "\\").replace(/^\\+/, "")
+      : String(path || "").replace(/^\/+/, "");
+    const fullPath = relativePath ? `${root}${separator}${relativePath}` : (root || separator);
 
     try {
       if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
@@ -3002,7 +3021,7 @@ const App = {
   },
 
   runShellScript(path) {
-    const normalizedPath = String(path || "").replace(/\\/g, "/");
+    const normalizedPath = String(path || "");
     const scriptParts = normalizedPath.split("/").filter(part => part && part !== ".");
     if (!scriptParts.length || scriptParts.includes("..")) return;
 
@@ -3012,7 +3031,7 @@ const App = {
     const tab = this.openTerminalModal(scriptParts.join("/"));
     if (!tab) return;
 
-    const cwdParts = String(tab.cwd || "").replace(/\\/g, "/").split("/").filter(part => part && part !== ".");
+    const cwdParts = String(tab.cwd || "").split("/").filter(part => part && part !== ".");
     let commonParts = 0;
     while (commonParts < cwdParts.length && commonParts < scriptParts.length && cwdParts[commonParts] === scriptParts[commonParts]) {
       commonParts += 1;

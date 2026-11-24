@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import secrets
 import threading
 import time
@@ -19,6 +20,13 @@ LOGIN_LOCKOUT_MESSAGE = "\u0110\u0103ng nh\u1eadp sai qu\xe1 nhi\u1ec1u l\u1ea7n
 
 def get_root_dir() -> Path:
     return settings.ROOT_DIR
+
+
+def _clean_relative_path(relative_path: str) -> str:
+    path = relative_path or ""
+    if os.name == "nt":
+        return path.replace("/", "\\").lstrip("\\")
+    return path.lstrip("/")
 
 
 def _login_client_key(request: Request) -> str:
@@ -96,7 +104,7 @@ def get_safe_path(relative_path: str = "", must_exist: bool = True) -> Path:
     Validates and resolves a relative path against the active file root.
     Prevents path traversal attacks (e.g., ../../../etc/passwd).
     """
-    clean_path = (relative_path or "").lstrip("/\\")
+    clean_path = _clean_relative_path(relative_path)
     
     # Resolve the target path
     root_dir = get_root_dir()
@@ -123,7 +131,7 @@ def get_safe_path(relative_path: str = "", must_exist: bool = True) -> Path:
 
 def get_safe_path_entry(relative_path: str = "", must_exist: bool = True) -> Path:
     """Validate an in-root entry while preserving a final symlink."""
-    clean_path = (relative_path or "").lstrip("/\\")
+    clean_path = _clean_relative_path(relative_path)
     root_dir = get_root_dir().resolve()
     if not clean_path:
         return root_dir
