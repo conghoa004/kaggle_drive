@@ -520,7 +520,7 @@ class FileService:
         items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
 
         # Determine parent path
-        clean_rel = rel_path.strip().replace("\\", "/").strip("/")
+        clean_rel = (rel_path or "").replace("\\", "/").strip("/")
         parent_path = str(Path(clean_rel).parent).replace("\\", "/") if clean_rel else None
         if parent_path == ".":
             parent_path = ""

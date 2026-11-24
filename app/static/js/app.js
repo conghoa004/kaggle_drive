@@ -1566,7 +1566,7 @@ const App = {
   async confirmRename() {
     const targetPath = document.getElementById("renamePathTarget").value;
     const input = document.getElementById("renameInput");
-    const newName = input.value.trim();
+    const newName = input.value;
     if (!targetPath || !newName) return;
 
     try {
