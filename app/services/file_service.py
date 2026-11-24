@@ -1279,6 +1279,52 @@ class FileService:
                     status_code=413, detail="Archive expands beyond the configured size limit."
                 )
 
+        def check_zip_member_count_before_loading() -> None:
+            # ZipFile reads the entire central directory and builds its full
+            # ZipInfo list during construction. Count its records incrementally
+            # first so even a forged EOCD count cannot bypass the limit.
+            with archive_path.open("rb") as archive_stream:
+                end_record = zipfile._EndRecData(archive_stream)
+                if end_record is None:
+                    raise zipfile.BadZipFile("File is not a zip file")
+
+                directory_size = end_record[zipfile._ECD_SIZE]
+                directory_start = end_record[zipfile._ECD_LOCATION] - directory_size
+                archive_stream.seek(0, os.SEEK_END)
+                archive_size = archive_stream.tell()
+                if (
+                    directory_size < 0
+                    or directory_start < 0
+                    or directory_start + directory_size > archive_size
+                ):
+                    raise zipfile.BadZipFile("Invalid central directory bounds")
+
+                archive_stream.seek(directory_start)
+                directory_bytes_read = 0
+                member_count = 0
+                while directory_bytes_read < directory_size:
+                    header = archive_stream.read(zipfile.sizeCentralDir)
+                    if len(header) != zipfile.sizeCentralDir:
+                        raise zipfile.BadZipFile("Truncated central directory")
+                    record = zipfile.struct.unpack(zipfile.structCentralDir, header)
+                    if record[zipfile._CD_SIGNATURE] != zipfile.stringCentralDir:
+                        raise zipfile.BadZipFile("Invalid central directory entry")
+
+                    member_count += 1
+                    check_limits(member_count, 0)
+                    variable_size = sum(
+                        record[index]
+                        for index in (
+                            zipfile._CD_FILENAME_LENGTH,
+                            zipfile._CD_EXTRA_FIELD_LENGTH,
+                            zipfile._CD_COMMENT_LENGTH,
+                        )
+                    )
+                    directory_bytes_read += zipfile.sizeCentralDir + variable_size
+                    if directory_bytes_read > directory_size:
+                        raise zipfile.BadZipFile("Central directory entry exceeds its bounds")
+                    archive_stream.seek(variable_size, os.SEEK_CUR)
+
         def validate_extraction_targets(checked_members) -> None:
             planned = {}
             conflicts = []
@@ -1440,6 +1486,7 @@ class FileService:
         skipped_count = 0
         try:
             if zipfile.is_zipfile(archive_path):
+                check_zip_member_count_before_loading()
                 with zipfile.ZipFile(archive_path, "r") as zip_file:
                     members = zip_file.infolist()
                     unpacked_size = sum(
@@ -1486,9 +1533,13 @@ class FileService:
 
             elif tarfile.is_tarfile(archive_path):
                 with tarfile.open(archive_path, "r:*") as tar_file:
-                    members = tar_file.getmembers()
-                    unpacked_size = sum(member.size for member in members if member.isfile())
-                    check_limits(len(members), unpacked_size)
+                    members = []
+                    unpacked_size = 0
+                    for member in tar_file:
+                        members.append(member)
+                        if member.isfile():
+                            unpacked_size += member.size
+                        check_limits(len(members), unpacked_size)
 
                     checked_members = []
                     for member in members:
@@ -1531,7 +1582,29 @@ class FileService:
                 except ImportError:
                     raise HTTPException(status_code=500, detail="RAR support is unavailable.")
 
-                with rarfile.RarFile(archive_path, "r") as rar_file:
+                rar_member_count = 0
+
+                def check_rar_member_count(member) -> None:
+                    nonlocal rar_member_count
+                    is_file = getattr(member, "is_file", False)
+                    is_directory = getattr(member, "is_dir", False)
+                    if callable(is_file):
+                        is_file = is_file()
+                    if callable(is_directory):
+                        is_directory = is_directory()
+                    if not (is_file or is_directory):
+                        return
+
+                    split_before = getattr(rarfile, "RAR_FILE_SPLIT_BEFORE", 0)
+                    if split_before and getattr(member, "flags", 0) & split_before:
+                        return
+
+                    rar_member_count += 1
+                    check_limits(rar_member_count, 0)
+
+                with rarfile.RarFile(
+                    archive_path, "r", info_callback=check_rar_member_count
+                ) as rar_file:
                     members = rar_file.infolist()
                     unpacked_size = sum(
                         max(0, int(getattr(member, "file_size", 0)))
