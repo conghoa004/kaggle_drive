@@ -167,8 +167,9 @@ def _persist_upload_chunk_directories_locked() -> None:
                 pass
 
 
-def _validate_file_operation_tree(root: Path) -> None:
+def _validate_file_operation_tree(root: Path, cancel_event=None) -> None:
     """Reject special entries before mutating a tree."""
+    check_cancelled(cancel_event)
     if root.is_symlink():
         return
 
@@ -184,10 +185,12 @@ def _validate_file_operation_tree(root: Path) -> None:
 
     pending = [root]
     while pending:
+        check_cancelled(cancel_event)
         directory = pending.pop()
         try:
             with os.scandir(directory) as entries:
                 for entry in entries:
+                    check_cancelled(cancel_event)
                     child = Path(entry.path)
                     try:
                         mode = entry.stat(follow_symlinks=False).st_mode
@@ -209,6 +212,7 @@ def _validate_file_operation_tree(root: Path) -> None:
             raise
         except OSError as exc:
             raise HTTPException(status_code=403, detail=f"Could not inspect directory: {exc}")
+    check_cancelled(cancel_event)
 
 
 def _path_identity(path: Path):
@@ -828,7 +832,7 @@ class FileService:
         if not target.is_symlink() and target.resolve() == get_root_dir().resolve():
             raise HTTPException(status_code=403, detail="Không thể xóa thư mục gốc!")
 
-        _validate_file_operation_tree(target)
+        _validate_file_operation_tree(target, cancel_event)
 
         def remove_path(path: Path) -> None:
             check_cancelled(cancel_event)
@@ -890,7 +894,7 @@ class FileService:
         source = get_safe_path_entry(source_rel, must_exist=True)
         if source.is_symlink():
             raise HTTPException(status_code=400, detail="Symbolic links cannot be copied.")
-        _validate_file_operation_tree(source)
+        _validate_file_operation_tree(source, cancel_event)
         dest_folder = get_safe_path(dest_folder_rel, must_exist=True)
         if not dest_folder.is_dir():
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
@@ -980,7 +984,7 @@ class FileService:
         dest_folder = get_safe_path(dest_folder_rel, must_exist=True)
         if not dest_folder.is_dir():
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
-        _validate_file_operation_tree(source)
+        _validate_file_operation_tree(source, cancel_event)
 
         if source.is_dir() and not source.is_symlink():
             try:
