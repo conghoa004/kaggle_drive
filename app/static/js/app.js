@@ -779,6 +779,24 @@ const App = {
     return error;
   },
 
+  markFileOperationFinalizing(control) {
+    control.cancelRequested = false;
+    const task = UI.backgroundTasks.get(control.taskId);
+    if (task) {
+      task.cancelRequested = true;
+      if (task.cancelButton) {
+        const label = t("operation_finalizing");
+        task.cancelButton.disabled = true;
+        if (task.cancelLabel) task.cancelLabel.textContent = label;
+        task.cancelButton.title = label;
+        task.cancelButton.setAttribute("aria-label", label);
+      }
+    }
+    UI.updateBackgroundTask(control.taskId, {
+      detail: t("operation_finalizing")
+    });
+  },
+
   async cancelFileOperationTask(control) {
     control.cancelRequested = true;
     if (control.awaitingConfirmation) UI.resolveConfirmation(false);
@@ -786,7 +804,10 @@ const App = {
     if (operationId && !control.cancelSent) {
       control.cancelSent = true;
       try {
-        await API.cancelFileOperation(operationId);
+        const state = await API.cancelFileOperation(operationId);
+        if (state.status === "finalizing") {
+          this.markFileOperationFinalizing(control);
+        }
       } catch (error) {
         control.cancelSent = false;
         throw error;
@@ -804,7 +825,10 @@ const App = {
       if (control.cancelRequested && !control.cancelSent) {
         control.cancelSent = true;
         try {
-          await API.cancelFileOperation(operationId);
+          const cancellation = await API.cancelFileOperation(operationId);
+          if (cancellation.status === "finalizing") {
+            this.markFileOperationFinalizing(control);
+          }
         } catch (_) {
           control.cancelSent = false;
         }
@@ -813,11 +837,19 @@ const App = {
       while (true) {
         if (control.cancelRequested && !control.cancelSent) {
           control.cancelSent = true;
-          try { await API.cancelFileOperation(operationId); } catch (_) {
+          try {
+            const cancellation = await API.cancelFileOperation(operationId);
+            if (cancellation.status === "finalizing") {
+              this.markFileOperationFinalizing(control);
+            }
+          } catch (_) {
             control.cancelSent = false;
           }
         }
         const state = await API.getFileOperation(operationId);
+        if (state.status === "finalizing") {
+          this.markFileOperationFinalizing(control);
+        }
         if (state.status === "completed") return state.result;
         if (state.status === "failed") {
           const operationError = state.error || {};
@@ -836,7 +868,11 @@ const App = {
         }
 
         UI.updateBackgroundTask(control.taskId, {
-          detail: state.status === "cancelling" ? t("operation_canceling") : detail,
+          detail: state.status === "cancelling"
+            ? t("operation_canceling")
+            : state.status === "finalizing"
+              ? t("operation_finalizing")
+              : detail,
           progress: Number.isFinite(state.progress) ? state.progress : progress
         });
         await new Promise(resolve => window.setTimeout(resolve, 350));

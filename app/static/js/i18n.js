@@ -17,6 +17,7 @@ const I18n = {
       delete_in_progress: "\u0110ang x\u00f3a t\u1ec7p v\u00e0 th\u01b0 m\u1ee5c...",
       operation_cancel_button: "H\u1ee7y",
       operation_canceling: "\u0110ang h\u1ee7y...",
+      operation_finalizing: "\u0110ang ho\u00e0n t\u1ea5t thao t\u00e1c...",
       operation_cancelled: "\u0110\u00e3 h\u1ee7y thao t\u00e1c. C\u00e1c thay \u0111\u1ed5i \u0111\u00e3 ho\u00e0n t\u1ea5t v\u1eabn \u0111\u01b0\u1ee3c gi\u1eef l\u1ea1i.",
       // General
       app_name: "Kaggle Cloud Drive",
@@ -378,6 +379,7 @@ const I18n = {
       delete_in_progress: "Deleting files and folders...",
       operation_cancel_button: "Cancel",
       operation_canceling: "Canceling...",
+      operation_finalizing: "Finishing operation...",
       operation_cancelled: "Operation cancelled. Changes already completed are kept.",
       // General
       app_name: "Kaggle Cloud Drive",
@@ -739,6 +741,7 @@ const I18n = {
       delete_in_progress: "\u6b63\u5728\u5220\u9664\u6587\u4ef6\u548c\u6587\u4ef6\u5939...",
       operation_cancel_button: "\u53d6\u6d88",
       operation_canceling: "\u6b63\u5728\u53d6\u6d88...",
+      operation_finalizing: "\u6b63\u5728\u5b8c\u6210\u64cd\u4f5c...",
       operation_cancelled: "\u64cd\u4f5c\u5df2\u53d6\u6d88\u3002\u5df2\u5b8c\u6210\u7684\u66f4\u6539\u4f1a\u4fdd\u7559\u3002",
       // General
       app_name: "Kaggle Cloud Drive",

@@ -389,6 +389,25 @@ def _path_to_api(path: Path) -> str:
     return path.as_posix()
 
 
+def _unique_archive_root_names(targets: List[Path]) -> List[str]:
+    """Give each selected archive root a distinct, extraction-safe name."""
+    used_names = set()
+    unique_names = []
+
+    for target in targets:
+        original_name = target.name
+        stem, suffix = os.path.splitext(original_name)
+        candidate = original_name
+        counter = 1
+        while os.path.normcase(os.path.normpath(candidate)) in used_names:
+            candidate = f"{stem}_copy{counter}{suffix}"
+            counter += 1
+        used_names.add(os.path.normcase(os.path.normpath(candidate)))
+        unique_names.append(candidate)
+
+    return unique_names
+
+
 def get_file_category(extension: str) -> str:
     """Determine UI category for icon and previewer."""
     return EXTENSION_CATEGORIES.get(extension.lower(), "generic")
@@ -1015,7 +1034,10 @@ class FileService:
 
     @staticmethod
     def move_item(
-        source_rel: str, dest_folder_rel: str, cancel_event=None
+        source_rel: str,
+        dest_folder_rel: str,
+        cancel_event=None,
+        on_finalizing=None,
     ) -> Dict[str, Any]:
         """Move an item while rejecting moves into its own subtree."""
         check_cancelled(cancel_event)
@@ -1096,6 +1118,8 @@ class FileService:
                         dirs_exist_ok=True,
                     )
                     check_cancelled(cancel_event)
+                    if on_finalizing is not None:
+                        on_finalizing()
                     destination_committed = True
                     shutil.rmtree(source)
             else:
@@ -2101,6 +2125,7 @@ class FileService:
         if not item_paths:
             raise HTTPException(status_code=400, detail="No items were selected.")
         targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
+        archive_root_names = _unique_archive_root_names(targets)
         archive = tempfile.SpooledTemporaryFile(
             max_size=8 * 1024 * 1024, mode="w+b", prefix=".zip-spool-"
         )
@@ -2140,7 +2165,7 @@ class FileService:
 
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-                for target in targets:
+                for target, archive_root_name in zip(targets, archive_root_names):
                     check_cancelled(cancel_event)
                     if target.is_symlink():
                         raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
@@ -2150,13 +2175,13 @@ class FileService:
                                 status_code=400,
                                 detail="Only regular files can be archived.",
                             )
-                        add_file(zip_file, target, target.name)
+                        add_file(zip_file, target, archive_root_name)
                     elif target.is_dir():
                         folder_entries = 0
                         for path, is_directory in _iter_archive_entries(target, cancel_event):
                             check_cancelled(cancel_event)
                             relative = path.relative_to(target)
-                            archive_name = (Path(target.name) / relative).as_posix()
+                            archive_name = (Path(archive_root_name) / relative).as_posix()
                             if is_directory:
                                 add_empty_directory(zip_file, archive_name)
                             else:
@@ -2164,7 +2189,7 @@ class FileService:
                             folder_entries += 1
                         if not folder_entries:
                             add_empty_directory(
-                                zip_file, Path(target.name).as_posix() + "/"
+                                zip_file, Path(archive_root_name).as_posix() + "/"
                             )
                     else:
                         raise HTTPException(status_code=400, detail="Selected item is not a regular file or directory.")
@@ -2191,6 +2216,7 @@ class FileService:
         if not item_paths:
             raise HTTPException(status_code=400, detail="No items selected for compression.")
         targets = [get_safe_path_entry(path, must_exist=True) for path in item_paths]
+        archive_root_names = _unique_archive_root_names(targets)
         first = targets[0]
         dest_dir = get_safe_path(target_folder_rel, must_exist=True) if target_folder_rel else first.parent
         if not dest_dir.is_dir():
@@ -2266,7 +2292,7 @@ class FileService:
             ) as output:
                 temp_path = Path(output.name)
                 with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-                    for target in targets:
+                    for target, archive_root_name in zip(targets, archive_root_names):
                         check_cancelled(cancel_event)
                         if target.is_symlink():
                             raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
@@ -2276,7 +2302,7 @@ class FileService:
                                     status_code=400,
                                     detail="Only regular files can be archived.",
                                 )
-                            add_file(zip_file, target, target.name)
+                            add_file(zip_file, target, archive_root_name)
                         elif target.is_dir():
                             directory_entries = 0
                             for path, is_directory in _iter_archive_entries(target, cancel_event):
@@ -2284,14 +2310,14 @@ class FileService:
                                 if not is_directory and path.resolve() in (dest.resolve(), temp_path.resolve()):
                                     continue
                                 relative = path.relative_to(target)
-                                archive_path = (Path(target.name) / relative).as_posix()
+                                archive_path = (Path(archive_root_name) / relative).as_posix()
                                 if is_directory:
                                     add_empty_directory(zip_file, archive_path + "/")
                                 else:
                                     add_file(zip_file, path, archive_path)
                                 directory_entries += 1
                             if not directory_entries:
-                                add_empty_directory(zip_file, Path(target.name).as_posix() + "/")
+                                add_empty_directory(zip_file, Path(archive_root_name).as_posix() + "/")
                         else:
                             raise HTTPException(status_code=400, detail="Selected item is not a regular file or directory.")
                 output.flush()

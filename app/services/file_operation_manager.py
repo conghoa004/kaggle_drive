@@ -49,7 +49,7 @@ class FileOperationManager:
                 )
                 self._executor_shutdown = False
             active_count = sum(
-                item.status in {"queued", "running", "cancelling"}
+                item.status in {"queued", "running", "cancelling", "finalizing"}
                 for item in self._operations.values()
             )
             if active_count >= MAX_ACTIVE_FILE_OPERATIONS:
@@ -141,6 +141,15 @@ class FileOperationManager:
             with self._lock:
                 self._prune_locked()
 
+    def _mark_finalizing(self, operation_id: str) -> None:
+        """Close the cancellation window before irreversible source cleanup."""
+        with self._lock:
+            item = self._operations.get(operation_id)
+            if item is None or item.cancel_event.is_set() or item.status == "cancelling":
+                raise OperationCancelledError("File operation cancelled.")
+            item.status = "finalizing"
+            item.updated_at = time.monotonic()
+
     def _run(self, operation_id: str) -> None:
         with self._lock:
             item = self._operations.get(operation_id)
@@ -202,7 +211,10 @@ class FileOperationManager:
             )
         if item.operation == "move":
             return FileService.move_item(
-                payload["source_path"], payload["target_folder"], cancel_event
+                payload["source_path"],
+                payload["target_folder"],
+                cancel_event,
+                lambda: self._mark_finalizing(item.operation_id),
             )
         if item.operation == "delete":
             return FileService.delete_item(payload["path"], cancel_event)
