@@ -22,11 +22,24 @@ def is_project_server(pid: int) -> bool:
     try:
         import psutil
         process = psutil.Process(pid)
-        command = process.cmdline()
         working_dir = Path(process.cwd()).resolve()
+        expected_script = (PROJECT_DIR / "run.py").resolve()
+        owns_project_script = False
+        for argument in process.cmdline():
+            if Path(argument).name.lower() != "run.py":
+                continue
+            script_path = Path(argument)
+            if not script_path.is_absolute():
+                script_path = working_dir / script_path
+            if script_path.resolve() == expected_script:
+                owns_project_script = True
+                break
+
         return (
-            working_dir == PROJECT_DIR.resolve()
-            and any(Path(arg).name.lower() == "run.py" for arg in command)
+            process.is_running()
+            and process.status() != psutil.STATUS_ZOMBIE
+            and working_dir == PROJECT_DIR.resolve()
+            and owns_project_script
         )
     except Exception:
         return False

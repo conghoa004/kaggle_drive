@@ -9,6 +9,7 @@ import time
 import signal
 import socket
 import argparse
+import ipaddress
 import subprocess
 import threading
 from pathlib import Path
@@ -120,6 +121,23 @@ def stop_previous_project_server(port: int) -> tuple[bool, str]:
     return True, f"Stopped previous Kaggle Cloud Drive process(es): {stopped_pids}."
 
 
+def _local_server_url(bind_host: str, port: int) -> str:
+    """Return a loopback URL for wildcard binds, or the configured address otherwise."""
+    host = bind_host.strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+
+    if address is not None and address.is_unspecified:
+        host = "::1" if address.version == 6 else "127.0.0.1"
+
+    authority = f"[{host.replace('%', '%25')}]" if ":" in host else host
+    return f"http://{authority}:{port}"
+
+
 def print_banner(public_url: str | None, username: str, password: str, root_dir: Path, lang: str = "vi"):
     """Display modern terminal banner."""
     sep = "=" * 68
@@ -144,7 +162,7 @@ def print_banner(public_url: str | None, username: str, password: str, root_dir:
         print(f"  Configured URL   : {public_url} (tunnel status unverified)")
     else:
         print("  Public URL       : unavailable (local-only mode)")
-    print(f"  Local URL        : http://127.0.0.1:{settings.PORT}")
+    print(f"  Local URL        : {_local_server_url(settings.HOST, settings.PORT)}")
     print(f"  Username         : \033[96m{username}\033[0m")
     print(f"  Password         : \033[93m{password}\033[0m")
     print(f"  Default Language : \033[95m{lang_str}\033[0m")
@@ -221,7 +239,8 @@ def main():
     server_thread.start()
 
     # Wait for FastAPI server to become healthy
-    health_url = f"http://127.0.0.1:{settings.PORT}/health"
+    local_url = _local_server_url(settings.HOST, settings.PORT)
+    health_url = f"{local_url}/health"
     started = False
     for _ in range(30):
         try:
@@ -239,7 +258,6 @@ def main():
 
     print("[✓] FastAPI server is healthy and responding.")
 
-    local_url = f"http://127.0.0.1:{settings.PORT}"
     public_url = None
     print(f"LOCAL_READY {local_url}", flush=True)
     if settings.ENABLE_TUNNEL:
