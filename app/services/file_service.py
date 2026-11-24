@@ -73,11 +73,6 @@ MEDIA_MIMETYPES = {
     "xls": "application/vnd.ms-excel"
 }
 
-_SYSTEM_PSEUDO_FILESYSTEM_ROOTS = (
-    tuple(Path(path) for path in ("/proc", "/sys", "/dev", "/run"))
-    if os.name != "nt"
-    else ()
-)
 UPLOAD_CHUNK_TTL_SECONDS = 24 * 60 * 60
 UPLOAD_CHUNK_CLEANUP_INTERVAL_SECONDS = 60 * 60
 _UPLOAD_CHUNK_DIRECTORIES: Dict[Path, float] = {}
@@ -171,25 +166,8 @@ def _persist_upload_chunk_directories_locked() -> None:
                 pass
 
 
-def _is_system_pseudo_path(path: Path) -> bool:
-    return any(path == root or root in path.parents for root in _SYSTEM_PSEUDO_FILESYSTEM_ROOTS)
-
-
-def _is_system_pseudo_entry(path: Path) -> bool:
-    if _is_system_pseudo_path(path):
-        return True
-    if path.is_symlink():
-        try:
-            return _is_system_pseudo_path(path.resolve())
-        except OSError:
-            return False
-    return False
-
-
 def _validate_file_operation_tree(root: Path) -> None:
-    """Reject pseudo-filesystems and special entries before mutating a tree."""
-    if _is_system_pseudo_entry(root):
-        raise HTTPException(status_code=403, detail="System virtual filesystems cannot be modified.")
+    """Reject special entries before mutating a tree."""
     if root.is_symlink():
         return
 
@@ -210,11 +188,6 @@ def _validate_file_operation_tree(root: Path) -> None:
             with os.scandir(directory) as entries:
                 for entry in entries:
                     child = Path(entry.path)
-                    if _is_system_pseudo_entry(child):
-                        raise HTTPException(
-                            status_code=403,
-                            detail="Directories containing system virtual filesystems cannot be modified.",
-                        )
                     try:
                         mode = entry.stat(follow_symlinks=False).st_mode
                     except OSError as exc:
@@ -238,7 +211,7 @@ def _validate_file_operation_tree(root: Path) -> None:
 
 
 def _is_regular_archive_file(path: Path) -> bool:
-    if path.is_symlink() or _is_system_pseudo_path(path):
+    if path.is_symlink():
         return False
     try:
         return (
@@ -250,10 +223,8 @@ def _is_regular_archive_file(path: Path) -> bool:
 
 
 def _iter_archive_files(root: Path, cancel_event=None):
-    """Yield visible regular files while pruning symlinks and virtual system trees."""
+    """Yield visible regular files while pruning symlinks and hidden paths."""
     check_cancelled(cancel_event)
-    if _is_system_pseudo_path(root):
-        return
 
     def ignore_walk_error(_error):
         return None
@@ -267,11 +238,7 @@ def _iter_archive_files(root: Path, cancel_event=None):
         for name in subdirectories:
             check_cancelled(cancel_event)
             child = directory_path / name
-            if (
-                not name.startswith(".")
-                and not child.is_symlink()
-                and not _is_system_pseudo_path(child)
-            ):
+            if not name.startswith(".") and not child.is_symlink():
                 visible_subdirectories.append(name)
         subdirectories[:] = visible_subdirectories
         for filename in filenames:
@@ -402,10 +369,6 @@ class FileService:
     @staticmethod
     def register_upload_chunk_directory(directory: Path) -> None:
         _register_upload_chunk_directory(directory)
-
-    @staticmethod
-    def is_system_pseudo_path(path: Path) -> bool:
-        return _is_system_pseudo_entry(Path(path))
 
     @staticmethod
     def is_upload_chunk_cancelled(upload_id: str) -> bool:
@@ -837,8 +800,6 @@ class FileService:
         dest_folder = get_safe_path(dest_folder_rel, must_exist=True)
         if not dest_folder.is_dir():
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
-        if _is_system_pseudo_entry(dest_folder):
-            raise HTTPException(status_code=403, detail="System virtual filesystems cannot be modified.")
 
         if source.is_dir():
             try:
@@ -914,8 +875,6 @@ class FileService:
         if not dest_folder.is_dir():
             raise HTTPException(status_code=400, detail="Destination must be a directory.")
         _validate_file_operation_tree(source)
-        if _is_system_pseudo_entry(dest_folder):
-            raise HTTPException(status_code=403, detail="System virtual filesystems cannot be modified.")
 
         if source.is_dir() and not source.is_symlink():
             try:
@@ -1015,7 +974,7 @@ class FileService:
                     if not _is_regular_archive_file(target):
                         raise HTTPException(
                             status_code=400,
-                            detail="System and special files cannot be archived.",
+                            detail="Special files cannot be archived.",
                         )
                     add_file(zip_file, target, target.name)
                 elif target.is_dir():
@@ -1081,8 +1040,6 @@ class FileService:
             if folder_name.endswith(".tar"):
                 folder_name = Path(folder_name).stem
             dest_dir = archive_path.parent / folder_name
-        if _is_system_pseudo_entry(dest_dir):
-            raise HTTPException(status_code=403, detail="System virtual filesystems cannot be modified.")
 
         root_dir = get_root_dir().resolve()
         destination_directories_created = []
@@ -1114,9 +1071,6 @@ class FileService:
                 member_path.relative_to(dest_root)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Archive path escapes the destination.")
-
-            if _is_system_pseudo_entry(member_path):
-                raise HTTPException(status_code=403, detail="System virtual filesystems cannot be modified.")
 
             cursor = dest_root
             for part in parts:
@@ -1727,11 +1681,6 @@ class FileService:
                     check_cancelled(cancel_event)
                     if target.is_symlink():
                         raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
-                    if _is_system_pseudo_path(target):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="System virtual filesystems cannot be archived.",
-                        )
                     if target.is_file():
                         if not _is_regular_archive_file(target):
                             raise HTTPException(
@@ -1852,11 +1801,6 @@ class FileService:
                 with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                     for target in targets:
                         check_cancelled(cancel_event)
-                        if _is_system_pseudo_path(target):
-                            raise HTTPException(
-                                status_code=400,
-                                detail="System virtual filesystems cannot be archived.",
-                            )
                         if target.is_symlink():
                             raise HTTPException(status_code=400, detail="Symbolic links cannot be archived.")
                         if target.is_file():
