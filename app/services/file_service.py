@@ -842,7 +842,7 @@ class FileService:
             raise HTTPException(status_code=403, detail="Cannot rename the configured root directory.")
 
         # Sanitize new_name to avoid path injection
-        clean_new_name = os.path.basename(new_name.strip())
+        clean_new_name = os.path.basename(new_name)
         if not clean_new_name or clean_new_name in (".", ".."):
             raise HTTPException(status_code=400, detail="Tên mới không hợp lệ.")
 
@@ -1185,13 +1185,26 @@ class FileService:
             dest_dir = archive_path.parent / folder_name
 
         root_dir = get_root_dir().resolve()
+
+        def validate_destination_root(path: Path) -> Path:
+            resolved = path.resolve()
+            try:
+                resolved.relative_to(root_dir)
+            except ValueError:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Extraction destination is outside the configured root.",
+                )
+            return resolved
+
+        validate_destination_root(dest_dir)
         destination_directories_created = []
         cursor = dest_dir
         while cursor != root_dir and not cursor.exists():
             destination_directories_created.append(cursor)
             cursor = cursor.parent
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_root = dest_dir.resolve()
+        dest_root = validate_destination_root(dest_dir)
 
         def safe_member_path(member_name: str) -> Path:
             normalized = str(member_name).replace("\\", "/")

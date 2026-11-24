@@ -3,6 +3,7 @@ import os
 import signal
 import struct
 import subprocess
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ class _TerminalSession:
     process: subprocess.Popen
     master_fd: Optional[int]
     loop: asyncio.AbstractEventLoop
+    created_at: float = field(default_factory=time.monotonic)
     history: Deque[bytes] = field(default_factory=deque)
     history_bytes: int = 0
     history_truncated: bool = False

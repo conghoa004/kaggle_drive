@@ -96,7 +96,7 @@ def get_safe_path(relative_path: str = "", must_exist: bool = True) -> Path:
     Validates and resolves a relative path against the active file root.
     Prevents path traversal attacks (e.g., ../../../etc/passwd).
     """
-    clean_path = (relative_path or "").strip().lstrip("/\\")
+    clean_path = (relative_path or "").lstrip("/\\")
     
     # Resolve the target path
     root_dir = get_root_dir()
@@ -123,7 +123,7 @@ def get_safe_path(relative_path: str = "", must_exist: bool = True) -> Path:
 
 def get_safe_path_entry(relative_path: str = "", must_exist: bool = True) -> Path:
     """Validate an in-root entry while preserving a final symlink."""
-    clean_path = (relative_path or "").strip().lstrip("/\\")
+    clean_path = (relative_path or "").lstrip("/\\")
     root_dir = get_root_dir().resolve()
     if not clean_path:
         return root_dir
