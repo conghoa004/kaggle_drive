@@ -1097,19 +1097,41 @@ class FileService:
                 os.symlink(os.readlink(source), dest_item, target_is_directory=source.is_dir())
                 destination_identity = _path_identity(dest_item)
                 check_cancelled(cancel_event)
+                if on_finalizing is not None:
+                    on_finalizing()
                 destination_committed = True
                 source.unlink()
             elif source.is_dir():
-                # Reserve the name first. On POSIX, rename replaces this empty
-                # directory atomically; on another filesystem, copy into it.
+                # Reserve the name first. Rename on the same filesystem; copy
+                # across filesystems so cancellation remains available mid-copy.
                 dest_item.mkdir()
                 destination_identity = _path_identity(dest_item)
                 check_cancelled(cancel_event)
-                try:
-                    os.rename(source, dest_item)
-                except OSError as exc:
-                    if exc.errno != errno.EXDEV and os.name != "nt":
-                        raise
+                same_filesystem = source.stat().st_dev == dest_folder.stat().st_dev
+                if same_filesystem and os.name != "nt":
+                    try:
+                        if on_finalizing is None:
+                            os.rename(source, dest_item)
+                        else:
+                            on_finalizing(lambda: os.rename(source, dest_item))
+                    except OSError as exc:
+                        if exc.errno != errno.EXDEV:
+                            raise
+                        shutil.copytree(
+                            source,
+                            dest_item,
+                            symlinks=True,
+                            copy_function=copy_move_file,
+                            dirs_exist_ok=True,
+                        )
+                        check_cancelled(cancel_event)
+                        if on_finalizing is not None:
+                            on_finalizing()
+                        destination_committed = True
+                        shutil.rmtree(source)
+                    else:
+                        destination_committed = True
+                else:
                     shutil.copytree(
                         source,
                         dest_item,
@@ -1139,6 +1161,8 @@ class FileService:
                 else:
                     destination_identity = _path_identity(dest_item)
                 check_cancelled(cancel_event)
+                if on_finalizing is not None:
+                    on_finalizing()
                 destination_committed = True
                 source.unlink()
         except OperationCancelledError:

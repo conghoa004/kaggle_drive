@@ -1,3 +1,4 @@
+import errno
 import threading
 import time
 import uuid
@@ -141,14 +142,22 @@ class FileOperationManager:
             with self._lock:
                 self._prune_locked()
 
-    def _mark_finalizing(self, operation_id: str) -> None:
-        """Close the cancellation window before irreversible source cleanup."""
+    def _mark_finalizing(self, operation_id: str, action=None):
+        """Close cancellation before commit, optionally running an atomic action."""
         with self._lock:
             item = self._operations.get(operation_id)
             if item is None or item.cancel_event.is_set() or item.status == "cancelling":
                 raise OperationCancelledError("File operation cancelled.")
             item.status = "finalizing"
             item.updated_at = time.monotonic()
+            if action is not None:
+                try:
+                    return action()
+                except OSError as exc:
+                    if exc.errno == errno.EXDEV:
+                        item.status = "running"
+                        item.updated_at = time.monotonic()
+                    raise
 
     def _run(self, operation_id: str) -> None:
         with self._lock:
@@ -213,7 +222,7 @@ class FileOperationManager:
                 payload["source_path"],
                 payload["target_folder"],
                 cancel_event,
-                lambda: self._mark_finalizing(item.operation_id),
+                lambda action=None: self._mark_finalizing(item.operation_id, action),
             )
         if item.operation == "delete":
             return FileService.delete_item(payload["path"], cancel_event)
