@@ -41,13 +41,91 @@ def ensure_dependencies():
 
 
 import urllib.request
+
+
+def _normalize_ip_address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        address = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped
+    return address
+
+
+def _bind_host_addresses(host: str, port: int):
+    normalized_host = host.strip()
+    if normalized_host.startswith("[") and normalized_host.endswith("]"):
+        normalized_host = normalized_host[1:-1]
+    if normalized_host in ("", "*"):
+        return (
+            ipaddress.ip_address("0.0.0.0"),
+            ipaddress.ip_address("::"),
+        )
+
+    address = _normalize_ip_address(normalized_host)
+    if address is not None:
+        return (address,)
+
+    try:
+        return tuple({
+            address
+            for result in socket.getaddrinfo(
+                normalized_host, port, type=socket.SOCK_STREAM
+            )
+            if (address := _normalize_ip_address(result[4][0])) is not None
+        })
+    except OSError:
+        return ()
+
+
+def _listener_conflicts_with_bind_host(listener_host: str, bind_addresses) -> bool:
+    listener_address = _normalize_ip_address(listener_host)
+    if listener_address is None:
+        return True
+
+    for bind_address in bind_addresses:
+        if bind_address == listener_address:
+            return True
+        if bind_address.is_unspecified and (
+            bind_address.version == listener_address.version
+            or bind_address.version == 6
+            or listener_address.is_unspecified
+        ):
+            return True
+        if listener_address.is_unspecified and (
+            listener_address.version == bind_address.version
+            or listener_address.version == 6
+        ):
+            return True
+    return False
+
+
 def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """Check if a network port is already bound."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex((host, port)) == 0
+    """Check listeners that conflict with the requested bind address."""
+    bind_addresses = _bind_host_addresses(host, port)
+    if not bind_addresses:
+        return False
+
+    try:
+        import psutil
+        connections = psutil.net_connections(kind="inet")
+    except (ImportError, OSError):
+        return True
+    except Exception:
+        return True
+
+    for connection in connections:
+        if connection.status != psutil.CONN_LISTEN or not connection.laddr:
+            continue
+        local_host = connection.laddr.ip if hasattr(connection.laddr, "ip") else connection.laddr[0]
+        local_port = connection.laddr.port if hasattr(connection.laddr, "port") else connection.laddr[1]
+        if local_port == port and _listener_conflicts_with_bind_host(local_host, bind_addresses):
+            return True
+    return False
 
 
-def stop_previous_project_server(port: int) -> tuple[bool, str]:
+def stop_previous_project_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
     """Stop a listener only when it is this project's previous run.py process."""
     try:
         import psutil
@@ -55,13 +133,25 @@ def stop_previous_project_server(port: int) -> tuple[bool, str]:
         return False, "psutil is unavailable, so the listener cannot be identified safely."
 
     try:
-        listeners = [
-            connection
-            for connection in psutil.net_connections(kind="inet")
-            if connection.status == psutil.CONN_LISTEN
-            and connection.laddr
-            and connection.laddr.port == port
-        ]
+        bind_addresses = _bind_host_addresses(host, port)
+        listeners = []
+        for connection in psutil.net_connections(kind="inet"):
+            if connection.status != psutil.CONN_LISTEN or not connection.laddr:
+                continue
+            local_host = (
+                connection.laddr.ip
+                if hasattr(connection.laddr, "ip")
+                else connection.laddr[0]
+            )
+            local_port = (
+                connection.laddr.port
+                if hasattr(connection.laddr, "port")
+                else connection.laddr[1]
+            )
+            if local_port == port and _listener_conflicts_with_bind_host(
+                local_host, bind_addresses
+            ):
+                listeners.append(connection)
     except (psutil.AccessDenied, OSError) as exc:
         return False, f"Could not inspect port {port} safely: {exc}"
 
@@ -112,9 +202,9 @@ def stop_previous_project_server(port: int) -> tuple[bool, str]:
             return False, f"Could not stop project server PID {pid}: {exc}"
 
     deadline = time.monotonic() + 3
-    while is_port_in_use(port) and time.monotonic() < deadline:
+    while is_port_in_use(port, host) and time.monotonic() < deadline:
         time.sleep(0.1)
-    if is_port_in_use(port):
+    if is_port_in_use(port, host):
         remaining = ", ".join(unidentified) if unidentified else "another listener"
         return False, f"Stopped project server PID(s) {stopped_pids}, but port {port} remains occupied by {remaining}."
 
@@ -213,9 +303,9 @@ def main():
     if args.no_tunnel:
         settings.ENABLE_TUNNEL = False
 
-    if is_port_in_use(settings.PORT):
+    if is_port_in_use(settings.PORT, settings.HOST):
         print(f"[*] Port {settings.PORT} is already in use; checking for a previous Kaggle Cloud Drive process...")
-        freed, message = stop_previous_project_server(settings.PORT)
+        freed, message = stop_previous_project_server(settings.PORT, settings.HOST)
         if freed:
             print(f"[OK] {message}")
         else:
@@ -275,6 +365,9 @@ def main():
 
     if not started:
         print("[!] Failed to verify FastAPI server startup.")
+        server.should_exit = True
+        tunnel_service.stop_tunnel()
+        server_thread.join()
         sys.exit(1)
 
     print("[✓] FastAPI server is healthy and responding.")
