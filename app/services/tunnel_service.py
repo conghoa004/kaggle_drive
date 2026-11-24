@@ -138,15 +138,17 @@ class CloudflareTunnelService:
         port: int,
         quick: bool = False,
         verify_public_health: bool = True,
+        origin_url: Optional[str] = None,
     ) -> Optional[str]:
         """Start cloudflared and optionally verify public application health."""
         self.ensure_binary()
         self.stop_tunnel()
-        print(f"[*] Starting Cloudflare Tunnel for 127.0.0.1:{port}...")
+        origin_url = origin_url or f"http://127.0.0.1:{port}"
+        print(f"[*] Starting Cloudflare Tunnel for {origin_url}...")
         if settings.TUNNEL_TOKEN and not quick:
             cmd = [str(self.binary_path), "tunnel", "run", "--token", settings.TUNNEL_TOKEN]
         else:
-            cmd = [str(self.binary_path), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"]
+            cmd = [str(self.binary_path), "tunnel", "--no-autoupdate", "--url", origin_url]
         self.output_queue = queue.Queue(maxsize=500)
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 

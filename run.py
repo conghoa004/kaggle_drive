@@ -235,6 +235,21 @@ def main():
         access_log=False
     )
     server = uvicorn.Server(config)
+
+    shutdown_requested = threading.Event()
+
+    def handle_shutdown(signum, frame):
+        if shutdown_requested.is_set():
+            return
+        shutdown_requested.set()
+        print("\n[*] Shutting down Kaggle Cloud Drive...")
+        server.should_exit = True
+        tunnel_service.stop_tunnel()
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handle_shutdown)
+
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
 
@@ -243,6 +258,8 @@ def main():
     health_url = f"{local_url}/health"
     started = False
     for _ in range(30):
+        if shutdown_requested.is_set():
+            break
         try:
             req = urllib.request.Request(health_url)
             with urllib.request.urlopen(req, timeout=1) as res:
@@ -251,6 +268,10 @@ def main():
                     break
         except Exception:
             time.sleep(0.5)
+
+    if shutdown_requested.is_set():
+        server_thread.join()
+        return
 
     if not started:
         print("[!] Failed to verify FastAPI server startup.")
@@ -262,7 +283,13 @@ def main():
     print(f"LOCAL_READY {local_url}", flush=True)
     if settings.ENABLE_TUNNEL:
         try:
-            public_url = tunnel_service.start_tunnel(settings.PORT)
+            public_url = tunnel_service.start_tunnel(
+                settings.PORT, origin_url=local_url
+            )
+            if shutdown_requested.is_set():
+                tunnel_service.stop_tunnel()
+                server_thread.join()
+                return
             process_alive = tunnel_service.process and tunnel_service.process.poll() is None
             if tunnel_service.url_verified and process_alive:
                 print(f"PUBLIC_READY {public_url}", flush=True)
@@ -276,11 +303,18 @@ def main():
                 print("LOCAL_ONLY", flush=True)
         except Exception as e:
             tunnel_service.stop_tunnel()
+            if shutdown_requested.is_set():
+                server_thread.join()
+                return
             print(f"[!] Cloudflare Tunnel error: {e}")
             print(f"[*] Continuing in local-only mode: {local_url}")
             print("LOCAL_ONLY", flush=True)
     else:
         print("LOCAL_ONLY", flush=True)
+
+    if shutdown_requested.is_set():
+        server_thread.join()
+        return
 
     print_banner(
         public_url=public_url,
@@ -290,17 +324,7 @@ def main():
         lang=settings.DEFAULT_LANG
     )
 
-    # Keep main thread alive and handle clean shutdown
-    def handle_shutdown(signum, frame):
-        print("\n[*] Shutting down Kaggle Cloud Drive...")
-        tunnel_service.stop_tunnel()
-        server.should_exit = True
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, handle_shutdown)
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, handle_shutdown)
-
+    # Keep the main thread alive until Uvicorn completes lifespan cleanup.
     try:
         # Stream cloudflared output or idle wait
         while server_thread.is_alive():
