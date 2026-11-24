@@ -3,6 +3,7 @@ import os
 import signal
 import struct
 import subprocess
+import threading
 import time
 import uuid
 from collections import deque
@@ -35,6 +36,7 @@ class _TerminalSession:
     process: subprocess.Popen
     master_fd: Optional[int]
     loop: asyncio.AbstractEventLoop
+    write_lock: threading.Lock = field(default_factory=threading.Lock)
     created_at: float = field(default_factory=time.monotonic)
     history: Deque[bytes] = field(default_factory=deque)
     history_bytes: int = 0
@@ -213,6 +215,33 @@ class PtyTerminalService:
             session.history_truncated = True
 
     @staticmethod
+    def _write_pty(session: _TerminalSession, data: bytes) -> None:
+        """Write all terminal input without blocking the asyncio event loop."""
+        with session.write_lock:
+            fd = session.master_fd
+            if fd is None or session.closed or session.exited:
+                return
+
+            remaining = memoryview(data)
+            while remaining:
+                written = os.write(fd, remaining)
+                if written <= 0:
+                    raise OSError("PTY accepted no input bytes.")
+                remaining = remaining[written:]
+
+    @staticmethod
+    def _close_pty_fd(session: _TerminalSession, fd: int) -> None:
+        """Close the PTY only after any in-flight input write has finished."""
+        with session.write_lock:
+            if session.master_fd != fd:
+                return
+            session.master_fd = None
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    @staticmethod
     def _read_pty(session: _TerminalSession) -> None:
         fd = session.master_fd
         if fd is None or session.closed or session.exited:
@@ -239,11 +268,9 @@ class PtyTerminalService:
             except Exception:
                 pass
             session.reader_paused = False
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            session.master_fd = None
+            session.loop.create_task(
+                asyncio.to_thread(PtyTerminalService._close_pty_fd, session, fd)
+            )
             queue = session.output_queue
             if queue is not None and not queue.full():
                 queue.put_nowait(None)
@@ -298,7 +325,11 @@ class PtyTerminalService:
             if kind == "input":
                 data = message.get("data", "")
                 if isinstance(data, str) and data and session.master_fd is not None:
-                    os.write(session.master_fd, data.encode("utf-8"))
+                    await asyncio.to_thread(
+                        PtyTerminalService._write_pty,
+                        session,
+                        data.encode("utf-8"),
+                    )
             elif kind == "ping":
                 await websocket.send_json({"type": "pong"})
             elif kind == "clear":
@@ -429,11 +460,6 @@ class PtyTerminalService:
                 session.loop.remove_reader(session.master_fd)
             except Exception:
                 pass
-            try:
-                os.close(session.master_fd)
-            except OSError:
-                pass
-            session.master_fd = None
 
         queue = session.output_queue
         if queue is not None:
@@ -459,6 +485,13 @@ class PtyTerminalService:
                 except OSError:
                     pass
                 await asyncio.to_thread(session.process.wait)
+
+        if session.master_fd is not None:
+            await asyncio.to_thread(
+                PtyTerminalService._close_pty_fd,
+                session,
+                session.master_fd,
+            )
 
     @staticmethod
     async def close_session(session_id: str) -> Dict[str, str]:
