@@ -201,7 +201,7 @@ app/
   services/
     file_service.py               Filesystem operations
     port_service.py               TCP listener scan and per-port tunnel control
-    pty_terminal_service.py        Linux PTY terminal sessions
+    persistent_pty_service.py      Linux PTY terminal sessions
     system_service.py              CPU, memory, disk, and GPU metrics
     tunnel_service.py              Cloudflare Tunnel lifecycle
   static/
