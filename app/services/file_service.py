@@ -400,6 +400,7 @@ def _is_invalid_rar_error(exc: Exception) -> bool:
 
 
 MAX_EXTRACT_REVIEW_PATHS = 1000
+MAX_ARCHIVE_METADATA_HEADER_BYTES = 1024 * 1024
 
 
 def _overwrite_required(paths: List[str], max_paths: int = 10) -> HTTPException:
@@ -1279,6 +1280,147 @@ class FileService:
                     status_code=413, detail="Archive expands beyond the configured size limit."
                 )
 
+        metadata_header_types = tuple(
+            getattr(tarfile, name)
+            for name in (
+                "XHDTYPE",
+                "XGLTYPE",
+                "SOLARIS_XHDTYPE",
+                "GNUTYPE_LONGNAME",
+                "GNUTYPE_LONGLINK",
+            )
+            if hasattr(tarfile, name)
+        )
+
+        class BoundedTarInfo(tarfile.TarInfo):
+            @staticmethod
+            def _account_metadata(tar_file, byte_count):
+                total_metadata = (
+                    getattr(tar_file, "_kaggle_archive_metadata_bytes", 0)
+                    + byte_count
+                )
+                if total_metadata > settings.MAX_ARCHIVE_METADATA_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Archive metadata exceeds the configured limit.",
+                    )
+                tar_file._kaggle_archive_metadata_bytes = total_metadata
+
+            def _proc_member(self, tar_file):
+                if self.type in metadata_header_types:
+                    header_size = self.size
+                    if header_size < 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Archive contains metadata with an invalid size.",
+                        )
+                    if header_size > min(
+                        MAX_ARCHIVE_METADATA_HEADER_BYTES,
+                        settings.MAX_ARCHIVE_METADATA_BYTES,
+                    ):
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Archive metadata entry exceeds the configured limit.",
+                        )
+                    self._account_metadata(tar_file, header_size)
+                return super()._proc_member(tar_file)
+
+            def _proc_sparse(self, tar_file):
+                structs, is_extended, original_size = self._sparse_structs
+                del self._sparse_structs
+                while is_extended:
+                    block = tar_file.fileobj.read(tarfile.BLOCKSIZE)
+                    self._account_metadata(tar_file, len(block))
+                    position = 0
+                    for _ in range(21):
+                        try:
+                            offset = tarfile.nti(block[position:position + 12])
+                            size = tarfile.nti(block[position + 12:position + 24])
+                        except ValueError:
+                            break
+                        if offset and size:
+                            if len(structs) >= settings.MAX_ARCHIVE_MEMBERS:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail="Archive contains too many sparse entries.",
+                                )
+                            structs.append((offset, size))
+                        position += 24
+                    is_extended = bool(block[504])
+
+                self.sparse = structs
+                self.offset_data = tar_file.fileobj.tell()
+                tar_file.offset = self.offset_data + self._block(self.size)
+                self.size = original_size
+                return self
+
+            def _proc_gnusparse_01(self, tar_info, pax_headers):
+                sparse_map = pax_headers["GNU.sparse.map"]
+                if sparse_map.count(",") + 1 > settings.MAX_ARCHIVE_MEMBERS * 2:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Archive contains too many sparse entries.",
+                    )
+                values = sparse_map.split(",")
+                sparse = [int(value) for value in values]
+                tar_info.sparse = list(zip(sparse[::2], sparse[1::2]))
+
+            def _proc_gnusparse_10(self, tar_info, pax_headers, tar_file):
+                block = tar_file.fileobj.read(tarfile.BLOCKSIZE)
+                self._account_metadata(tar_file, len(block))
+                fields_line, remainder = block.split(b"\n", 1)
+                field_count = int(fields_line)
+                if field_count < 0 or field_count > settings.MAX_ARCHIVE_MEMBERS:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Archive contains too many sparse entries.",
+                    )
+                sparse = []
+                while len(sparse) < field_count * 2:
+                    if b"\n" not in remainder:
+                        block = tar_file.fileobj.read(tarfile.BLOCKSIZE)
+                        self._account_metadata(tar_file, len(block))
+                        remainder += block
+                    number, remainder = remainder.split(b"\n", 1)
+                    sparse.append(int(number))
+                tar_info.offset_data = tar_file.fileobj.tell()
+                tar_info.sparse = list(zip(sparse[::2], sparse[1::2]))
+
+            def _proc_gnusparse_00(self, tar_info, raw_headers):
+                offsets = []
+                sizes = []
+                for _length, keyword, value in raw_headers:
+                    if keyword == b"GNU.sparse.offset":
+                        if len(offsets) >= settings.MAX_ARCHIVE_MEMBERS:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="Archive contains too many sparse entries.",
+                            )
+                        try:
+                            offsets.append(int(value.decode()))
+                        except ValueError:
+                            raise tarfile.InvalidHeaderError("invalid sparse offset")
+                    elif keyword == b"GNU.sparse.numbytes":
+                        if len(sizes) >= settings.MAX_ARCHIVE_MEMBERS:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="Archive contains too many sparse entries.",
+                            )
+                        try:
+                            sizes.append(int(value.decode()))
+                        except ValueError:
+                            raise tarfile.InvalidHeaderError("invalid sparse size")
+                tar_info.sparse = list(zip(offsets, sizes))
+
+        def is_tar_archive_with_limits() -> bool:
+            try:
+                with tarfile.open(
+                    archive_path, "r:*", tarinfo=BoundedTarInfo
+                ):
+                    return True
+            except (tarfile.TarError, OSError, EOFError):
+                return False
+
         def check_zip_member_count_before_loading() -> None:
             # ZipFile reads the entire central directory and builds its full
             # ZipInfo list during construction. Count its records incrementally
@@ -1289,6 +1431,11 @@ class FileService:
                     raise zipfile.BadZipFile("File is not a zip file")
 
                 directory_size = end_record[zipfile._ECD_SIZE]
+                if directory_size > settings.MAX_ARCHIVE_METADATA_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Archive metadata exceeds the configured limit.",
+                    )
                 directory_start = end_record[zipfile._ECD_LOCATION] - directory_size
                 archive_stream.seek(0, os.SEEK_END)
                 archive_size = archive_stream.tell()
@@ -1531,8 +1678,10 @@ class FileService:
                                 )
                         extracted_count += 1
 
-            elif tarfile.is_tarfile(archive_path):
-                with tarfile.open(archive_path, "r:*") as tar_file:
+            elif is_tar_archive_with_limits():
+                with tarfile.open(
+                    archive_path, "r:*", tarinfo=BoundedTarInfo
+                ) as tar_file:
                     members = []
                     unpacked_size = 0
                     for member in tar_file:

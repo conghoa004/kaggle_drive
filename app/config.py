@@ -59,6 +59,9 @@ class Settings:
         self.MAX_REMOTE_DOWNLOAD_BYTES = _positive_int_env("KAGGLE_DRIVE_MAX_REMOTE_DOWNLOAD_BYTES", 5 * 1024**3)
         self.MAX_ARCHIVE_MEMBERS = _positive_int_env("KAGGLE_DRIVE_MAX_ARCHIVE_MEMBERS", 100000)
         self.MAX_ARCHIVE_UNPACKED_BYTES = _positive_int_env("KAGGLE_DRIVE_MAX_ARCHIVE_UNPACKED_BYTES", 10 * 1024**3)
+        self.MAX_ARCHIVE_METADATA_BYTES = _positive_int_env(
+            "KAGGLE_DRIVE_MAX_ARCHIVE_METADATA_BYTES", 64 * 1024**2
+        )
         self.MAX_TEXT_PREVIEW_SIZE = _positive_int_env("KAGGLE_DRIVE_MAX_TEXT_PREVIEW_BYTES", 10 * 1024**2)
 
         # 6. Localization

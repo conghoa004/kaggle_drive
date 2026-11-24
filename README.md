@@ -173,6 +173,7 @@ Copy `.env.example` to `.env` and edit it before starting the app. CLI options o
 | `KAGGLE_DRIVE_MAX_REMOTE_DOWNLOAD_BYTES` | `5368709120` (5 GiB) | Maximum size for a URL download. |
 | `KAGGLE_DRIVE_MAX_ARCHIVE_MEMBERS` | `100000` | Maximum archive entries to process. |
 | `KAGGLE_DRIVE_MAX_ARCHIVE_UNPACKED_BYTES` | `10737418240` (10 GiB) | Maximum uncompressed archive size. |
+| `KAGGLE_DRIVE_MAX_ARCHIVE_METADATA_BYTES` | `67108864` (64 MiB) | Maximum ZIP central-directory and TAR metadata size. |
 
 ## Security notes
 
