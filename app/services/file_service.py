@@ -293,13 +293,14 @@ def _is_regular_archive_file(path: Path) -> bool:
         return False
 
 
-def _iter_archive_files(root: Path, cancel_event=None):
-    """Yield visible regular files while pruning symlinks and hidden paths."""
+def _iter_archive_entries(root: Path, cancel_event=None):
+    """Yield visible regular files and leaf directories that would otherwise be lost."""
     check_cancelled(cancel_event)
 
     def ignore_walk_error(_error):
         return None
 
+    empty_directories = []
     for directory, subdirectories, filenames in os.walk(
         root, topdown=True, onerror=ignore_walk_error, followlinks=False
     ):
@@ -312,6 +313,7 @@ def _iter_archive_files(root: Path, cancel_event=None):
             if not name.startswith(".") and not child.is_symlink():
                 visible_subdirectories.append(name)
         subdirectories[:] = visible_subdirectories
+        has_regular_file = False
         for filename in filenames:
             check_cancelled(cancel_event)
             path = directory_path / filename
@@ -319,7 +321,14 @@ def _iter_archive_files(root: Path, cancel_event=None):
             if any(part.startswith(".") for part in relative.parts):
                 continue
             if _is_regular_archive_file(path):
-                yield path
+                has_regular_file = True
+                yield path, False
+        if directory_path != root and not visible_subdirectories and not has_regular_file:
+            empty_directories.append(directory_path)
+
+    for directory in empty_directories:
+        check_cancelled(cancel_event)
+        yield directory, True
 
 
 def _cleanup_stale_upload_chunk_files(directory: Path, now: Optional[float] = None) -> bool:
@@ -1118,6 +1127,14 @@ class FileService:
                         break
                     archived.write(chunk)
 
+        def add_empty_directory(zip_file, archive_name):
+            nonlocal entries
+            check_cancelled(cancel_event)
+            entries += 1
+            if entries > settings.MAX_ARCHIVE_MEMBERS:
+                raise HTTPException(status_code=413, detail="ZIP contains too many entries.")
+            zip_file.writestr(archive_name.rstrip("/") + "/", "")
+
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                 if target.is_file():
@@ -1128,10 +1145,16 @@ class FileService:
                         )
                     add_file(zip_file, target, target.name)
                 elif target.is_dir():
-                    for path in _iter_archive_files(target, cancel_event=cancel_event):
+                    for path, is_directory in _iter_archive_entries(
+                        target, cancel_event=cancel_event
+                    ):
                         check_cancelled(cancel_event)
                         relative = path.relative_to(target)
-                        add_file(zip_file, path, relative.as_posix())
+                        archive_name = relative.as_posix()
+                        if is_directory:
+                            add_empty_directory(zip_file, archive_name)
+                        else:
+                            add_file(zip_file, path, archive_name)
                 else:
                     raise HTTPException(
                         status_code=400,
@@ -1842,6 +1865,14 @@ class FileService:
                         break
                     archived.write(chunk)
 
+        def add_empty_directory(zip_file, archive_name):
+            nonlocal entries
+            check_cancelled(cancel_event)
+            entries += 1
+            if entries > settings.MAX_ARCHIVE_MEMBERS:
+                raise HTTPException(status_code=413, detail="ZIP contains too many entries.")
+            zip_file.writestr(archive_name.rstrip("/") + "/", "")
+
         try:
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
                 for target in targets:
@@ -1857,17 +1888,19 @@ class FileService:
                         add_file(zip_file, target, target.name)
                     elif target.is_dir():
                         folder_entries = 0
-                        for path in _iter_archive_files(target, cancel_event):
+                        for path, is_directory in _iter_archive_entries(target, cancel_event):
+                            check_cancelled(cancel_event)
                             relative = path.relative_to(target)
                             archive_name = (Path(target.name) / relative).as_posix()
-                            add_file(zip_file, path, archive_name)
+                            if is_directory:
+                                add_empty_directory(zip_file, archive_name)
+                            else:
+                                add_file(zip_file, path, archive_name)
                             folder_entries += 1
                         if not folder_entries:
-                            check_cancelled(cancel_event)
-                            entries += 1
-                            if entries > settings.MAX_ARCHIVE_MEMBERS:
-                                raise HTTPException(status_code=413, detail="ZIP contains too many entries.")
-                            zip_file.writestr(Path(target.name).as_posix() + "/", "")
+                            add_empty_directory(
+                                zip_file, Path(target.name).as_posix() + "/"
+                            )
                     else:
                         raise HTTPException(status_code=400, detail="Selected item is not a regular file or directory.")
             if not entries:
@@ -1981,13 +2014,16 @@ class FileService:
                             add_file(zip_file, target, target.name)
                         elif target.is_dir():
                             directory_entries = 0
-                            for path in _iter_archive_files(target, cancel_event):
+                            for path, is_directory in _iter_archive_entries(target, cancel_event):
                                 check_cancelled(cancel_event)
-                                if path.resolve() in (dest.resolve(), temp_path.resolve()):
+                                if not is_directory and path.resolve() in (dest.resolve(), temp_path.resolve()):
                                     continue
                                 relative = path.relative_to(target)
                                 archive_path = (Path(target.name) / relative).as_posix()
-                                add_file(zip_file, path, archive_path)
+                                if is_directory:
+                                    add_empty_directory(zip_file, archive_path + "/")
+                                else:
+                                    add_file(zip_file, path, archive_path)
                                 directory_entries += 1
                             if not directory_entries:
                                 add_empty_directory(zip_file, Path(target.name).as_posix() + "/")

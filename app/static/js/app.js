@@ -22,6 +22,7 @@ const AppState = {
 
 const App = {
   clipboardPasteInProgress: false,
+  directoryLoadSequence: 0,
 
   init() {
     I18n.init();
@@ -292,6 +293,7 @@ const App = {
   },
 
   async handleLogout() {
+    this.directoryLoadSequence += 1;
     await this.closeTerminalSession();
     try {
       await API.logout();
@@ -307,6 +309,7 @@ const App = {
   },
 
   async loadDirectory(path = "", resetSearch = true) {
+    const loadSequence = ++this.directoryLoadSequence;
     this.hideContextMenu();
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
@@ -337,6 +340,7 @@ const App = {
 
     try {
       const data = await API.listFiles(path, AppState.showHidden);
+      if (loadSequence !== this.directoryLoadSequence) return;
       AppState.parentPath = data.parent_path;
       AppState.rootDir = data.root_dir || AppState.rootDir;
       const canonicalPath = typeof data.current_path === "string"
@@ -354,6 +358,7 @@ const App = {
       this.renderBreadcrumb();
       this.renderFiles();
     } catch (err) {
+      if (loadSequence !== this.directoryLoadSequence) return;
       UI.toast(`${t("error")}: ${err.message}`, "error");
     }
   },
@@ -2079,6 +2084,7 @@ const App = {
   },
 
   async openPortsPage() {
+    this.directoryLoadSequence += 1;
     this.toggleMobileSidebar(false);
     const mainContent = document.getElementById("mainContentArea");
     const portsPage = document.getElementById("portManagerPage");
