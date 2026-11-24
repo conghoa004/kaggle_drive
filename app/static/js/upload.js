@@ -459,7 +459,9 @@ const Uploader = {
             xhr.upload.onprogress = (event) => {
               if (event.lengthComputable && progressBar && progressText) {
                 const inFlight = Math.min(blob.size, event.loaded);
-                const percent = Math.round(((completedBytes + inFlight) / totalBytes) * 100);
+                const percent = totalBytes > 0
+                  ? Math.round(((completedBytes + inFlight) / totalBytes) * 100)
+                  : 0;
                 progressBar.style.width = percent + "%";
                 progressText.textContent = percent + "% (" +
                   UI.formatSize(completedBytes + inFlight) + " / " + UI.formatSize(totalBytes) + ")";
@@ -505,6 +507,14 @@ const Uploader = {
         this.activeChunkUploads = this.activeChunkUploads.filter(
           upload => upload.upload_id !== uploadId
         );
+      }
+    }
+
+    if (totalBytes === 0) {
+      if (progressBar) progressBar.style.width = "100%";
+      if (progressText) {
+        progressText.textContent = "100% (" +
+          UI.formatSize(0) + " / " + UI.formatSize(0) + ")";
       }
     }
   }
