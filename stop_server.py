@@ -37,7 +37,6 @@ def is_project_server(pid: int) -> bool:
 
         return (
             process.is_running()
-            and process.status() != psutil.STATUS_ZOMBIE
             and working_dir == PROJECT_DIR.resolve()
             and owns_project_script
         )
