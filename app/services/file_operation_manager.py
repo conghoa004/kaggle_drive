@@ -199,8 +199,7 @@ class FileOperationManager:
                     item.status = "completed"
                 item.updated_at = time.monotonic()
 
-    @staticmethod
-    def _execute(item: _FileOperation) -> Any:
+    def _execute(self, item: _FileOperation) -> Any:
         from app.services.file_service import FileService
 
         payload = item.payload
