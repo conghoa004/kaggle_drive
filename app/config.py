@@ -43,11 +43,10 @@ class Settings:
         
         # Install Cloudflared into a system PATH directory on Kaggle so it is
         # available to notebook shells as `cloudflared`.
-        # if Path("/kaggle/working").exists():
-        #     cache_dir = Path("/usr/local/bin")
-        # else:
-        #     cache_dir = Path(__file__).resolve().parent.parent / ".cloudflared_bin"
-        cache_dir = Path("/usr/local/bin")
+        if Path("/kaggle/working").exists():
+            cache_dir = Path("/usr/local/bin")
+        else:
+            cache_dir = Path(__file__).resolve().parent.parent / ".cloudflared_bin"
 
         cache_dir.mkdir(parents=True, exist_ok=True)
         self.CLOUDFLARED_DIR = cache_dir
