@@ -32,7 +32,7 @@ class Settings:
 
         # 3. Security & Credentials
         self.USERNAME = os.getenv("KAGGLE_DRIVE_USERNAME", "admin")
-        self.PASSWORD = os.getenv("KAGGLE_DRIVE_PASSWORD") or secrets.token_urlsafe(16)
+        self.PASSWORD = os.getenv("KAGGLE_DRIVE_PASSWORD") or secrets.token_urlsafe(32)
         self.SECRET_KEY = os.getenv("KAGGLE_DRIVE_SECRET_KEY") or secrets.token_urlsafe(32)
         self.SESSION_MAX_AGE = int(os.getenv("SESSION_MAX_AGE", str(24 * 60 * 60)))  # 24 hours
 
