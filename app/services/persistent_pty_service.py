@@ -3,6 +3,7 @@ import os
 import signal
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -50,6 +51,46 @@ class _TerminalSession:
 
 
 class PtyTerminalService:
+    @staticmethod
+    def _ensure_inputrc() -> Optional[str]:
+        """Disable Readline active-region highlighting on bracketed paste."""
+        if os.name == "nt":
+            return None
+        lines = []
+        if Path("/etc/inputrc").is_file():
+            lines.append("$include /etc/inputrc")
+        user_inputrc = Path.home() / ".inputrc"
+        if user_inputrc.is_file():
+            lines.append(f"$include {user_inputrc}")
+        lines.append("set enable-active-region off")
+        content = "\n".join(lines) + "\n"
+
+        inputrc_path = Path(tempfile.gettempdir()) / f"kaggle-drive-inputrc-{os.getuid()}"
+        try:
+            if (
+                not inputrc_path.is_symlink()
+                and inputrc_path.is_file()
+                and inputrc_path.read_text(encoding="utf-8") == content
+            ):
+                return str(inputrc_path)
+            fd, temp_name = tempfile.mkstemp(
+                prefix=".kaggle-drive-inputrc-", dir=inputrc_path.parent
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(content)
+                os.chmod(temp_name, 0o600)
+                os.replace(temp_name, inputrc_path)
+            except Exception:
+                try:
+                    os.unlink(temp_name)
+                except OSError:
+                    pass
+                raise
+            return str(inputrc_path)
+        except OSError:
+            return None
+
     @staticmethod
     async def serve(websocket: WebSocket) -> None:
         if websocket.scope.get("session", {}).get("authenticated") is not True:
@@ -160,6 +201,10 @@ class PtyTerminalService:
             env["TERM"] = "xterm-256color"
             env["COLORTERM"] = "truecolor"
             env["PS1"] = r"\[\e[1;32m\]kaggle@drive\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ "
+            if "INPUTRC" not in env:
+                inputrc = PtyTerminalService._ensure_inputrc()
+                if inputrc:
+                    env["INPUTRC"] = inputrc
 
             def set_controlling_terminal():
                 fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
