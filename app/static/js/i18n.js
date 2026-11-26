@@ -248,8 +248,6 @@ const I18n = {
       terminal_minimized_status: "Terminal \u0111ang thu nh\u1ecf \u2014 b\u1ea5m \u0111\u1ec3 m\u1edf l\u1ea1i",
       terminal_clear_btn: "Xóa",
       terminal_clear_title: "Xóa toàn bộ nội dung hiển thị",
-      terminal_copy_btn: "Sao chép",
-      terminal_copy_title: "Sao chép toàn bộ kết quả terminal",
       terminal_quick_cmds: "Lệnh nhanh:",
       terminal_new_tab: "Tab mới",
       terminal_close_tab: "Đóng {name}",
@@ -261,7 +259,6 @@ const I18n = {
       terminal_status_disconnected: "Đã ngắt kết nối",
       terminal_status_error: "Có lỗi",
       terminal_reconnect_warning: "Terminal chưa kết nối lại được sau 5 lần thử; vẫn đang tự động thử lại.",
-      terminal_copy_toast: "Đã sao chép toàn bộ kết quả terminal!",
       terminal_copy_failed: "Không thể sao chép",
 
       // System Stats Modal
@@ -611,8 +608,6 @@ const I18n = {
       terminal_minimized_status: "Terminal minimized - click to restore",
       terminal_clear_btn: "Clear",
       terminal_clear_title: "Clear terminal screen",
-      terminal_copy_btn: "Copy",
-      terminal_copy_title: "Copy all terminal output",
       terminal_quick_cmds: "Quick commands:",
       terminal_new_tab: "New tab",
       terminal_close_tab: "Close {name}",
@@ -624,7 +619,6 @@ const I18n = {
       terminal_status_disconnected: "Disconnected",
       terminal_status_error: "Error",
       terminal_reconnect_warning: "Terminal could not reconnect after 5 attempts; it will keep retrying automatically.",
-      terminal_copy_toast: "Terminal output copied to clipboard!",
       terminal_copy_failed: "Failed to copy",
 
       // System Stats Modal
@@ -974,8 +968,6 @@ const I18n = {
       terminal_minimized_status: "\u7ec8\u7aef\u5df2\u6700\u5c0f\u5316\uff0c\u70b9\u51fb\u4ee5\u6062\u590d",
       terminal_clear_btn: "清屏",
       terminal_clear_title: "清除终端屏幕内容",
-      terminal_copy_btn: "复制",
-      terminal_copy_title: "复制全部终端输出",
       terminal_quick_cmds: "快捷命令:",
       terminal_new_tab: "新建标签页",
       terminal_close_tab: "关闭 {name}",
@@ -987,7 +979,6 @@ const I18n = {
       terminal_status_disconnected: "已断开",
       terminal_status_error: "错误",
       terminal_reconnect_warning: "终端尝试重新连接 5 次仍未成功，正在继续自动重试。",
-      terminal_copy_toast: "已复制终端输出到剪贴板！",
       terminal_copy_failed: "无法复制",
 
       // System Stats Modal

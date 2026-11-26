@@ -3149,22 +3149,6 @@ const App = {
     }
   },
 
-  copyTerminalOutput() {
-    const tab = this.getActiveTerminalTab();
-    if (!tab || !tab.instance) return;
-    tab.instance.selectAll();
-    const text = tab.instance.getSelection();
-    tab.instance.clearSelection();
-    if (!text) return;
-    this.copyTextToClipboard(text).then((ok) => {
-      if (ok) {
-        UI.toast(t("terminal_copy_toast"), "success");
-      } else {
-        UI.toast(t("terminal_copy_failed"), "warning");
-      }
-    });
-  },
-
   runShellScript(path) {
     const normalizedPath = String(path || "");
     const scriptParts = normalizedPath.split("/").filter(part => part && part !== ".");
