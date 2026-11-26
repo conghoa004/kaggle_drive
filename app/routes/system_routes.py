@@ -73,6 +73,14 @@ def close_port_tunnel(request: Request, port: int):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/terminal/sessions")
+async def list_terminal_sessions(request: Request):
+    """Return terminal sessions for the authenticated account."""
+    require_auth(request)
+    owner = str(request.session.get("username", "")).strip()
+    return {"sessions": PtyTerminalService.list_sessions(owner)}
+
+
 @router.websocket("/terminal/ws")
 async def run_terminal_pty(websocket: WebSocket):
     """Attach to an authenticated interactive PTY session."""
@@ -83,5 +91,5 @@ async def run_terminal_pty(websocket: WebSocket):
 async def close_terminal_session(request: Request, session_id: str):
     """Terminate one authenticated terminal session."""
     require_auth(request)
-    return await PtyTerminalService.close_session(session_id)
+    return await PtyTerminalService.close_session(session_id, str(request.session.get("username", "")).strip())
 

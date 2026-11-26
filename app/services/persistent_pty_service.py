@@ -10,7 +10,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Deque, Dict, Optional
+from typing import Deque, Dict, List, Optional
 from urllib.parse import urlsplit
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -37,6 +37,7 @@ class _TerminalSession:
     process: subprocess.Popen
     master_fd: Optional[int]
     loop: asyncio.AbstractEventLoop
+    owner: str = ""
     write_lock: threading.Lock = field(default_factory=threading.Lock)
     created_at: float = field(default_factory=time.monotonic)
     history: Deque[bytes] = field(default_factory=deque)
@@ -96,6 +97,10 @@ class PtyTerminalService:
         if websocket.scope.get("session", {}).get("authenticated") is not True:
             await websocket.close(code=1008)
             return
+        owner = str(websocket.scope.get("session", {}).get("username", "")).strip()
+        if not owner:
+            await websocket.close(code=1008)
+            return
 
         origin = websocket.headers.get("origin")
         host = websocket.headers.get("host", "")
@@ -120,6 +125,10 @@ class PtyTerminalService:
             return
 
         session = _TERMINAL_SESSIONS.get(session_id)
+        if session is not None:
+            if session.owner != owner:
+                await websocket.close(code=1008)
+                return
         resumed = session is not None and not session.closed
         if session is not None and session.closed:
             _TERMINAL_SESSIONS.pop(session_id, None)
@@ -153,7 +162,7 @@ class PtyTerminalService:
                 cwd = get_safe_path(requested_cwd, must_exist=True)
                 if not cwd.is_dir():
                     raise ValueError("The selected working directory is not a directory.")
-                session = PtyTerminalService._create_session(session_id, cwd)
+                session = PtyTerminalService._create_session(session_id, cwd, owner)
             except Exception:
                 await websocket.close(code=1008)
                 return
@@ -185,7 +194,7 @@ class PtyTerminalService:
                 pass
 
     @staticmethod
-    def _create_session(session_id: str, cwd: Path) -> _TerminalSession:
+    def _create_session(session_id: str, cwd: Path, owner: str = "") -> _TerminalSession:
         master_fd = None
         slave_fd = None
         try:
@@ -223,7 +232,7 @@ class PtyTerminalService:
             os.close(slave_fd)
             slave_fd = None
             loop = asyncio.get_running_loop()
-            session = _TerminalSession(session_id, cwd, process, master_fd, loop)
+            session = _TerminalSession(session_id, cwd, process, master_fd, loop, owner=owner)
             _TERMINAL_SESSIONS[session_id] = session
             loop.add_reader(master_fd, PtyTerminalService._read_pty, session)
             PtyTerminalService._schedule_idle_expiry(session)
@@ -488,6 +497,25 @@ class PtyTerminalService:
             pass
 
     @staticmethod
+    def list_sessions(owner: str) -> List[Dict[str, object]]:
+        """List terminal sessions owned by a user for cross-browser recovery."""
+        if not owner:
+            return []
+        return [
+            {
+                "session_id": session.session_id,
+                "cwd": str(session.cwd),
+                "exited": session.exited,
+                "attached": session.websocket is not None,
+            }
+            for session in sorted(
+                _TERMINAL_SESSIONS.values(),
+                key=lambda item: item.created_at,
+            )
+            if session.owner == owner and not session.closed
+        ]
+
+    @staticmethod
     async def _terminate_session(session: _TerminalSession) -> None:
         if session.closed:
             return
@@ -539,13 +567,13 @@ class PtyTerminalService:
             )
 
     @staticmethod
-    async def close_session(session_id: str) -> Dict[str, str]:
+    async def close_session(session_id: str, owner: Optional[str] = None) -> Dict[str, str]:
         try:
             normalized_id = str(uuid.UUID(session_id))
         except (ValueError, TypeError, AttributeError):
             return {"status": "closed"}
         session = _TERMINAL_SESSIONS.get(normalized_id)
-        if session is not None:
+        if session is not None and (owner is None or session.owner == owner):
             await PtyTerminalService._terminate_session(session)
         return {"status": "closed"}
 

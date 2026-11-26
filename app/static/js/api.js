@@ -235,6 +235,10 @@ const API = {
     return this.request("/api/system/ports/" + encodeURIComponent(port) + "/tunnel", { method: "DELETE" });
   },
 
+  getTerminalSessions() {
+    return this.request("/api/system/terminal/sessions");
+  },
+
   closeTerminalSession(sessionId) {
     return this.request("/api/system/terminal/" + encodeURIComponent(sessionId), { method: "DELETE" });
   }

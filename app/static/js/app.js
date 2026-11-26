@@ -2518,43 +2518,63 @@ const App = {
     } catch (_) {}
   },
 
-  restoreTerminalSessions() {
+  async restoreTerminalSessions() {
     if (this.terminalTabs.length) return;
+
+    let serverSessions = [];
+    try {
+      const response = await API.getTerminalSessions();
+      serverSessions = Array.isArray(response.sessions) ? response.sessions : [];
+    } catch (_) {
+      serverSessions = [];
+    }
+    if (this.terminalTabs.length) return;
+
     let saved;
     try {
       saved = JSON.parse(localStorage.getItem(this.terminalStorageKey) || sessionStorage.getItem(this.terminalStorageKey) || "null");
-    } catch (_) {
-      return;
+    } catch (_) {}
+    const savedTabs = Array.isArray(saved && saved.tabs) ? saved.tabs : [];
+    const savedTabsBySession = new Map();
+    const sessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    for (const record of savedTabs) {
+      if (record && typeof record.sessionId === "string" && sessionIdPattern.test(record.sessionId)) {
+        savedTabsBySession.set(record.sessionId.toLowerCase(), record);
+      }
     }
-    if (!saved || !Array.isArray(saved.tabs)) return;
-    const wasOpen = Boolean(saved.wasOpen);
+
+    const candidates = serverSessions.filter(session => !session.attached);
+    if (!candidates.length) return;
 
     const usedSessionIds = new Set();
     const usedTabIds = new Set();
     const restored = [];
-    for (const record of saved.tabs.slice(0, 4)) {
-      if (
-        !record ||
-        !/^terminal-[1-4]$/.test(record.id || "") ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.sessionId || "") ||
-        usedTabIds.has(record.id) ||
-        usedSessionIds.has(record.sessionId)
-      ) continue;
-      usedTabIds.add(record.id);
-      usedSessionIds.add(record.sessionId);
-      const tab = this.createTerminalTab(String(record.cwd || ""), {
-        id: record.id,
-        title: String(record.title || record.id),
-        sessionId: record.sessionId,
+    for (const serverSession of candidates.slice(0, 4)) {
+      const sessionId = String(serverSession.session_id || "").toLowerCase();
+      if (!sessionIdPattern.test(sessionId) || usedSessionIds.has(sessionId)) continue;
+      const savedTab = savedTabsBySession.get(sessionId);
+      let tabId = savedTab && savedTab.id;
+      if (!/^terminal-[1-4]$/.test(tabId || "") || usedTabIds.has(tabId)) {
+        let number = 1;
+        while (number <= 4 && usedTabIds.has("terminal-" + number)) number += 1;
+        if (number > 4) break;
+        tabId = "terminal-" + number;
+      }
+      usedSessionIds.add(sessionId);
+      usedTabIds.add(tabId);
+      const tab = this.createTerminalTab(String(serverSession.cwd || (savedTab && savedTab.cwd) || ""), {
+        id: tabId,
+        title: String((savedTab && savedTab.title) || ("Terminal " + tabId.split("-").pop())),
+        sessionId,
         restored: true
       });
       if (tab) restored.push(tab);
     }
     if (!restored.length) return;
 
-    const activeTab = restored.find(tab => tab.id === saved.activeId) || restored[0];
+    const activeTab = restored.find(tab => tab.id === (saved && saved.activeId)) || restored[0];
     this.activateTerminalTab(activeTab.id);
-    if (wasOpen) {
+    if (!saved || saved.wasOpen !== false) {
       this.setTerminalMinimized(false);
       UI.openModal("terminalModal");
     } else {
@@ -2562,6 +2582,7 @@ const App = {
     }
     this.persistTerminalTabs();
     restored.forEach(tab => this.connectTerminal(tab));
+    return restored.length;
   },
 
   getActiveTerminalTab() {
