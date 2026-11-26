@@ -256,7 +256,7 @@
           <i class="fa-solid fa-folder-open icon-folder"></i>
           <span data-i18n="nav_storage">Bộ nhớ</span>
         </div>
-        <div class="pinned-folder-section">
+        <div id="pinnedFolderSection" class="pinned-folder-section hidden">
           <div class="pinned-folder-heading" data-i18n="pinned_folders">Thư mục đã ghim</div>
           <div id="pinnedFolderList"></div>
         </div>
@@ -299,10 +299,7 @@
                 <i class="fa-solid fa-house-chimney icon-python"></i> working
               </span>
             </nav>
-            <button id="btnPinCurrentFolder" type="button" class="btn-tool shrink-0 hidden" onclick="App.toggleCurrentFolderPin()">
-              <i id="pinCurrentFolderIcon" class="fa-solid fa-thumbtack"></i>
-              <span id="pinCurrentFolderLabel" data-i18n="pin_folder">Ghim thư mục</span>
-            </button>
+
           </div>
 
           <!-- Action Toolbar -->

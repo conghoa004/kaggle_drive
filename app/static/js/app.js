@@ -193,7 +193,6 @@ const App = {
         .filter(path => path && !seen.has(path) && seen.add(path))
       : [];
     this.renderPinnedFolders();
-    this.renderCurrentFolderPinButton();
   },
 
   persistPinnedFolders() {
@@ -202,9 +201,11 @@ const App = {
     } catch (_) {}
   },
 
-  toggleCurrentFolderPin() {
-    const path = String(AppState.currentPath || "").split("/").filter(Boolean).join("/");
+  toggleFolderPin(folderPath) {
+    const path = String(folderPath || "").split("/").filter(Boolean).join("/");
     if (!path) return;
+    const item = AppState.files.find(file => file.path === path);
+    if (!item || !item.is_dir) return;
     const name = path.split("/").pop();
     const index = AppState.pinnedFolders.indexOf(path);
     if (index >= 0) {
@@ -216,7 +217,6 @@ const App = {
     }
     this.persistPinnedFolders();
     this.renderPinnedFolders();
-    this.renderCurrentFolderPinButton();
   },
 
   unpinFolder(folderPath) {
@@ -226,7 +226,6 @@ const App = {
     AppState.pinnedFolders.splice(index, 1);
     this.persistPinnedFolders();
     this.renderPinnedFolders();
-    this.renderCurrentFolderPinButton();
   },
 
   openPinnedFolder(folderPath) {
@@ -234,10 +233,12 @@ const App = {
   },
 
   renderPinnedFolders() {
+    const section = document.getElementById("pinnedFolderSection");
     const container = document.getElementById("pinnedFolderList");
-    if (!container) return;
+    if (!section || !container) return;
+    section.classList.toggle("hidden", !AppState.pinnedFolders.length);
     if (!AppState.pinnedFolders.length) {
-      container.innerHTML = '<div class="pinned-folder-empty">' + UI.escape(t("pinned_folders_empty")) + "</div>";
+      container.innerHTML = "";
       return;
     }
 
@@ -256,18 +257,7 @@ const App = {
     }).join("");
   },
 
-  renderCurrentFolderPinButton() {
-    const button = document.getElementById("btnPinCurrentFolder");
-    const icon = document.getElementById("pinCurrentFolderIcon");
-    const label = document.getElementById("pinCurrentFolderLabel");
-    if (!button || !icon || !label) return;
-    const path = String(AppState.currentPath || "").split("/").filter(Boolean).join("/");
-    button.classList.toggle("hidden", !path);
-    const isPinned = Boolean(path && AppState.pinnedFolders.includes(path));
-    icon.className = isPinned ? "fa-solid fa-thumbtack text-amber-500" : "fa-solid fa-thumbtack";
-    label.textContent = t(isPinned ? "unpin_folder" : "pin_folder");
-    button.title = t(isPinned ? "unpin_folder" : "pin_folder");
-  },
+
 
   refreshCurrentDirectory() {
     return this.loadDirectory(AppState.currentPath, false);
@@ -418,7 +408,6 @@ const App = {
     AppState.currentPath = normalizedPath;
     AppState.storagePath = normalizedPath;
     this.renderPinnedFolders();
-    this.renderCurrentFolderPinButton();
     try {
       localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
       localStorage.setItem("kaggle_drive_current_path", normalizedPath);
@@ -484,7 +473,6 @@ const App = {
     }
 
     container.innerHTML = html;
-    this.renderCurrentFolderPinButton();
   },
 
   getVisibleFiles() {
@@ -1168,6 +1156,8 @@ const App = {
       let itemsHtml = "";
 
       if (item.is_dir) {
+        const isPinned = AppState.pinnedFolders.includes(path);
+        const pinLabel = isPinned ? "unpin_folder" : "pin_folder";
         itemsHtml += `
           <button class="context-menu-item" onclick="App.hideContextMenu(); App.loadDirectory('${safePath}')">
             <div class="context-item-left">
@@ -1175,6 +1165,12 @@ const App = {
               <span>${t("action_open_folder")}</span>
             </div>
             <span class="context-item-kbd">Enter</span>
+          </button>
+          <button class="context-menu-item" onclick="App.hideContextMenu(); App.toggleFolderPin('${safePath}')">
+            <div class="context-item-left">
+              <span class="context-item-icon"><i class="fa-solid fa-thumbtack"></i></span>
+              <span>${t(pinLabel)}</span>
+            </div>
           </button>
           <button class="context-menu-item" onclick="App.hideContextMenu(); App.openTerminalModal('${safePath}')">
             <div class="context-item-left">
