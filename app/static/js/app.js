@@ -2818,6 +2818,112 @@ const App = {
     }
   },
 
+  getTerminalLogicalLineRange(buffer, cursorRow) {
+    let startRow = cursorRow;
+    while (startRow > 0) {
+      const line = buffer.getLine(startRow);
+      if (!line || !line.isWrapped) break;
+      startRow -= 1;
+    }
+    let endRow = cursorRow;
+    while (endRow + 1 < buffer.length) {
+      const nextLine = buffer.getLine(endRow + 1);
+      if (!nextLine || !nextLine.isWrapped) break;
+      endRow += 1;
+    }
+    return { startRow, endRow };
+  },
+
+  countTerminalChars(buffer, startRow, targetRow, targetCol) {
+    let count = 0;
+    let cell = buffer.getNullCell ? buffer.getNullCell() : null;
+    for (let row = startRow; row <= targetRow; row += 1) {
+      const line = buffer.getLine(row);
+      if (!line) break;
+      const limitCol = row === targetRow ? Math.min(targetCol, line.length) : line.length;
+      for (let col = 0; col < limitCol; col += 1) {
+        cell = line.getCell(col, cell);
+        if (!cell) continue;
+        if (cell.getWidth() > 0) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  },
+
+  getTerminalLineEndOffset(buffer, startRow, endRow, cursorOffset) {
+    let lastNonEmpty = 0;
+    let total = 0;
+    let cell = buffer.getNullCell ? buffer.getNullCell() : null;
+    for (let row = startRow; row <= endRow; row += 1) {
+      const line = buffer.getLine(row);
+      if (!line) break;
+      for (let col = 0; col < line.length; col += 1) {
+        cell = line.getCell(col, cell);
+        if (!cell) continue;
+        if (cell.getWidth() > 0) {
+          total += 1;
+          const ch = cell.getChars();
+          if (ch && ch !== " ") {
+            lastNonEmpty = total;
+          }
+        }
+      }
+    }
+    return Math.max(lastNonEmpty, cursorOffset);
+  },
+
+  deleteTerminalSelection(tab) {
+    if (!tab || !tab.instance || !tab.instance.hasSelection()) return false;
+    if (typeof tab.instance.getSelectionPosition !== "function") return false;
+
+    const buffer = tab.instance.buffer && tab.instance.buffer.active;
+    if (!buffer || buffer.type === "alternate") return false;
+
+    const pos = tab.instance.getSelectionPosition();
+    if (!pos || !pos.start || !pos.end) return false;
+
+    let start = pos.start;
+    let end = pos.end;
+    if (start.y > end.y || (start.y === end.y && start.x > end.x)) {
+      [start, end] = [end, start];
+    }
+
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    const { startRow, endRow } = this.getTerminalLogicalLineRange(buffer, cursorRow);
+    if (start.y < startRow || end.y > endRow) {
+      return false;
+    }
+
+    const cursorOffset = this.countTerminalChars(buffer, startRow, cursorRow, buffer.cursorX);
+    const lineEndOffset = this.getTerminalLineEndOffset(buffer, startRow, endRow, cursorOffset);
+    const selStartOffset = this.countTerminalChars(buffer, startRow, start.y, start.x);
+    const selEndOffset = Math.min(
+      this.countTerminalChars(buffer, startRow, end.y, end.x),
+      lineEndOffset
+    );
+
+    const deleteCount = selEndOffset - selStartOffset;
+    if (deleteCount <= 0) {
+      tab.instance.clearSelection();
+      return false;
+    }
+
+    const moveDelta = selEndOffset - cursorOffset;
+    let sequence = "";
+    if (moveDelta < 0) {
+      sequence += "\x1b[D".repeat(-moveDelta);
+    } else if (moveDelta > 0) {
+      sequence += "\x1b[C".repeat(moveDelta);
+    }
+    sequence += "\x7f".repeat(deleteCount);
+
+    tab.instance.clearSelection();
+    this.sendTerminalInput(sequence, tab);
+    return true;
+  },
+
   setupTerminalClipboard(tab, container) {
     if (!tab || !tab.instance) return;
     let nativePasteFired = false;
@@ -2830,41 +2936,68 @@ const App = {
     tab.instance.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
       const isModifier = (event.ctrlKey || event.metaKey) && !event.altKey;
-      if (!isModifier) return true;
-
       const key = (event.key || "").toLowerCase();
-      if (key === "c") {
-        if (tab.instance.hasSelection()) {
-          const selectedText = tab.instance.getSelection();
-          event.preventDefault();
-          tab.instance.clearSelection();
-          this.copyTextToClipboard(selectedText).then((ok) => {
-            if (!ok) UI.toast(t("terminal_copy_failed"), "warning");
-          });
+
+      if (isModifier) {
+        if (key === "c") {
+          if (tab.instance.hasSelection()) {
+            const selectedText = tab.instance.getSelection();
+            event.preventDefault();
+            tab.instance.clearSelection();
+            this.copyTextToClipboard(selectedText).then((ok) => {
+              if (!ok) UI.toast(t("terminal_copy_failed"), "warning");
+            });
+            return false;
+          }
+          if (event.shiftKey) {
+            event.preventDefault();
+            return false;
+          }
+          // No selection: pass Ctrl+C through as SIGINT (\x03).
+          return true;
+        }
+
+        if (key === "v") {
+          if (tab.instance.hasSelection()) {
+            this.deleteTerminalSelection(tab);
+          }
+          nativePasteFired = false;
+          // Let the browser's native paste event trigger xterm's paste handler
+          // without sending Ctrl+V (\x16) to the PTY; fall back to Clipboard API
+          // only when native paste did not fire (e.g. Ctrl+Shift+V in some browsers).
+          window.setTimeout(() => {
+            if (nativePasteFired) return;
+            if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+              navigator.clipboard.readText()
+                .then((text) => this.pasteTextToTerminal(tab, text))
+                .catch(() => {});
+            }
+          }, 20);
           return false;
         }
-        if (event.shiftKey) {
-          event.preventDefault();
-          return false;
-        }
-        // No selection: pass Ctrl+C through as SIGINT (\x03).
+
         return true;
       }
 
-      if (key === "v") {
-        nativePasteFired = false;
-        // Let the browser's native paste event trigger xterm's paste handler
-        // without sending Ctrl+V (\x16) to the PTY; fall back to Clipboard API
-        // only when native paste did not fire (e.g. Ctrl+Shift+V in some browsers).
-        window.setTimeout(() => {
-          if (nativePasteFired) return;
-          if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
-            navigator.clipboard.readText()
-              .then((text) => this.pasteTextToTerminal(tab, text))
-              .catch(() => {});
+      if (!event.altKey && tab.instance.hasSelection()) {
+        if (event.key === "Backspace" || event.key === "Delete") {
+          if (this.deleteTerminalSelection(tab)) {
+            event.preventDefault();
+            return false;
           }
-        }, 20);
-        return false;
+          return true;
+        }
+
+        if (
+          !event.isComposing &&
+          event.key !== "Process" &&
+          event.keyCode !== 229 &&
+          event.key &&
+          event.key.length === 1
+        ) {
+          this.deleteTerminalSelection(tab);
+          return true;
+        }
       }
 
       return true;
