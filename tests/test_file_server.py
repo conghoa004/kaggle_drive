@@ -437,7 +437,6 @@ class TestKaggleCloudDrive(unittest.TestCase):
             zipfile.structEndArchive64,
             zipfile.stringEndArchive64, 44, 45, 45, 0, 0, entries, entries, cd_size, cd_offset,
         )
-        zip64_loc_offset = eocd_pos + len(zip64_eocd)
         zip64_loc = struct.pack(
             zipfile.structEndArchive64Locator,
             zipfile.stringEndArchive64Locator, 0, eocd_pos, 1,

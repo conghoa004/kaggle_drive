@@ -1339,7 +1339,7 @@ class FileService:
                 )
             return resolved
 
-        validate_destination_root(dest_dir)
+        dest_root = validate_destination_root(dest_dir)
         destination_directories_created = []
         cursor = dest_dir
         while cursor != root_dir and not cursor.exists():
@@ -1353,7 +1353,6 @@ class FileService:
                     "message": "Extraction destination conflicts with an existing file.",
                 },
             )
-        dest_root = validate_destination_root(dest_dir)
 
         def safe_member_path(member_name: str) -> Path:
             normalized = str(member_name)

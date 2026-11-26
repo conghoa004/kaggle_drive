@@ -3013,7 +3013,6 @@ const App = {
         minCol,
         maxCol,
         startOffset: runningOffset,
-        endOffset: runningOffset + rowChars,
       };
       runningOffset += rowChars + (hasNewline ? 1 : 0);
     }
@@ -3028,14 +3027,17 @@ const App = {
     };
 
     return {
-      cursorRow,
-      wrappedRange,
-      hasPrompt: Boolean(promptInfo && promptInfo.promptRow <= wrappedRange.startRow),
       activeStartRow,
       activeEndRow,
       cursorOffset: offsetAt(cursorRow, buffer.cursorX),
       offsetAt,
     };
+  },
+
+  terminalCursorMoveSequence(moveDelta) {
+    if (moveDelta < 0) return "\x1b[D".repeat(-moveDelta);
+    if (moveDelta > 0) return "\x1b[C".repeat(moveDelta);
+    return "";
   },
 
   deleteTerminalSelection(tab) {
@@ -3050,18 +3052,12 @@ const App = {
     if (!pos || !pos.start || !pos.end) return false;
 
     const bounds = this.resolveTerminalSelectionBounds(tab, buffer, pos);
-    const start = { x: bounds.startCol, y: bounds.startRow };
-    const end = { x: bounds.endCol, y: bounds.endRow };
-
-    if (!region.hasPrompt && (start.y < region.wrappedRange.startRow || end.y > region.wrappedRange.endRow)) {
-      return false;
-    }
-    if (start.y < region.activeStartRow || end.y > region.activeEndRow) {
+    if (bounds.startRow < region.activeStartRow || bounds.endRow > region.activeEndRow) {
       return false;
     }
 
-    const selStartOffset = region.offsetAt(start.y, start.x);
-    const selEndOffset = region.offsetAt(end.y, end.x);
+    const selStartOffset = region.offsetAt(bounds.startRow, bounds.startCol);
+    const selEndOffset = region.offsetAt(bounds.endRow, bounds.endCol);
 
     const deleteCount = selEndOffset - selStartOffset;
     if (deleteCount <= 0) {
@@ -3072,14 +3068,9 @@ const App = {
       return false;
     }
 
-    const moveDelta = selEndOffset - region.cursorOffset;
-    let sequence = "";
-    if (moveDelta < 0) {
-      sequence += "\x1b[D".repeat(-moveDelta);
-    } else if (moveDelta > 0) {
-      sequence += "\x1b[C".repeat(moveDelta);
-    }
-    sequence += "\x7f".repeat(deleteCount);
+    const sequence =
+      this.terminalCursorMoveSequence(selEndOffset - region.cursorOffset) +
+      "\x7f".repeat(deleteCount);
 
     tab.instance.clearSelection();
     this.sendTerminalInput(sequence, tab);
@@ -3144,9 +3135,6 @@ const App = {
       const viewportRow = Math.max(0, Math.min(tab.instance.rows - 1, Math.floor((event.clientY - rect.top) / cellHeight)));
       const clickedRow = buffer.viewportY + viewportRow;
 
-      if (!region.hasPrompt && (clickedRow < region.wrappedRange.startRow || clickedRow > region.wrappedRange.endRow)) {
-        return;
-      }
       if (clickedRow < region.activeStartRow || clickedRow > region.activeEndRow) {
         return;
       }
@@ -3155,10 +3143,7 @@ const App = {
       const moveDelta = targetOffset - region.cursorOffset;
       if (moveDelta === 0 || Math.abs(moveDelta) > 20000) return;
 
-      const sequence = moveDelta < 0
-        ? "\x1b[D".repeat(-moveDelta)
-        : "\x1b[C".repeat(moveDelta);
-      this.sendTerminalInput(sequence, tab);
+      this.sendTerminalInput(this.terminalCursorMoveSequence(moveDelta), tab);
       tab.instance.focus();
     });
   },
