@@ -48,7 +48,7 @@ The default managed root is `/` on Kaggle and `./workspace` elsewhere. Override 
 
 ### Terminal
 
-- Open up to four terminal tabs. Each tab has its own shell, working directory, output, and connection.
+- Open up to ten terminal tabs. Each tab has its own shell, working directory, output, and connection.
 - The interactive PTY terminal requires Linux, such as a Kaggle runtime. It is not supported on Windows.
 - WebSocket heartbeats help keep idle connections alive. After unexpected disconnects, the client retries with increasing delays up to 30 seconds.
 - Sessions are indexed by the authenticated username. The same shell can be open in multiple browsers at once; all receive its output, and input from any browser goes to the shared shell. Once every browser disconnects, the session expires after 30 minutes. After expiry or a server restart, the old shell and its processes are gone; open a new terminal to start a new shell.

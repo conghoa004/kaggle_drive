@@ -2542,15 +2542,15 @@ const App = {
     const usedSessionIds = new Set();
     const usedTabIds = new Set();
     const restored = [];
-    for (const serverSession of candidates.slice(0, 4)) {
+    for (const serverSession of candidates.slice(0, 10)) {
       const sessionId = String(serverSession.session_id || "").toLowerCase();
       if (!sessionIdPattern.test(sessionId) || usedSessionIds.has(sessionId)) continue;
       const savedTab = savedTabsBySession.get(sessionId);
       let tabId = savedTab && savedTab.id;
-      if (!/^terminal-[1-4]$/.test(tabId || "") || usedTabIds.has(tabId)) {
+      if (!/^terminal-(?:[1-9]|10)$/.test(tabId || "") || usedTabIds.has(tabId)) {
         let number = 1;
-        while (number <= 4 && usedTabIds.has("terminal-" + number)) number += 1;
-        if (number > 4) break;
+        while (number <= 10 && usedTabIds.has("terminal-" + number)) number += 1;
+        if (number > 10) break;
         tabId = "terminal-" + number;
       }
       usedSessionIds.add(sessionId);
@@ -2648,7 +2648,7 @@ const App = {
   },
 
   createTerminalTab(cwd = "", options = {}) {
-    if (this.terminalTabs.length >= 4) {
+    if (this.terminalTabs.length >= 10) {
       UI.toast(t("terminal_max_tabs"), "warning");
       return null;
     }
