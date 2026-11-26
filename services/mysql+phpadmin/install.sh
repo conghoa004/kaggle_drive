@@ -152,7 +152,7 @@ MYSQL_PORT=$(mysql -Nse "SELECT @@port;" 2>/dev/null || true)
 HTTP_PORT=${HTTP_PORT:-80}
 MYSQL_PORT=${MYSQL_PORT:-3306}
 
-CRED_DIR="/workspaces/services/mysql+phpadmin"
+CRED_DIR="./"
 CRED_FILE="${CRED_DIR}/credentials.txt"
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
