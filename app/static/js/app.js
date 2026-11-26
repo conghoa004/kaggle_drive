@@ -2505,7 +2505,7 @@ const App = {
 
   persistTerminalTabs() {
     try {
-      sessionStorage.setItem(this.terminalStorageKey, JSON.stringify({
+      localStorage.setItem(this.terminalStorageKey, JSON.stringify({
         activeId: this.activeTerminalTabId,
         wasOpen: Boolean(document.getElementById("terminalModal")?.classList.contains("show")),
         tabs: this.terminalTabs.map(tab => ({
@@ -2522,7 +2522,7 @@ const App = {
     if (this.terminalTabs.length) return;
     let saved;
     try {
-      saved = JSON.parse(sessionStorage.getItem(this.terminalStorageKey) || "null");
+      saved = JSON.parse(localStorage.getItem(this.terminalStorageKey) || sessionStorage.getItem(this.terminalStorageKey) || "null");
     } catch (_) {
       return;
     }
@@ -3465,6 +3465,7 @@ const App = {
     if (header) header.textContent = t("terminal_title");
     this.renderTerminalTabs();
     if (!preserveStored) {
+      try { localStorage.removeItem(this.terminalStorageKey); } catch (_) {}
       try { sessionStorage.removeItem(this.terminalStorageKey); } catch (_) {}
     }
     await Promise.allSettled(closeRequests);
