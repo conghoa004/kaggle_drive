@@ -2834,44 +2834,49 @@ const App = {
     return { startRow, endRow };
   },
 
-  countTerminalChars(buffer, startRow, targetRow, targetCol) {
+  getTerminalPromptBoundary(buffer, cursorRow) {
+    const promptPattern = /^(?:\([^)]+\)\s*)?[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[^$#\r\n]*[$#]\s/;
+    const minSearchRow = Math.max(0, cursorRow - 200);
+    for (let row = cursorRow; row >= minSearchRow; row -= 1) {
+      const line = buffer.getLine(row);
+      if (!line) continue;
+      if (line.isWrapped) continue;
+      const text = line.translateToString(true);
+      const match = text.match(promptPattern);
+      if (match) {
+        return { promptRow: row, promptEndCol: match[0].length };
+      }
+    }
+    return null;
+  },
+
+  getTerminalRowTextEndCol(line, minCol = 0, floorCol = 0, buffer = null) {
+    let lastNonBlankCol = minCol;
+    let cell = buffer && buffer.getNullCell ? buffer.getNullCell() : null;
+    for (let col = minCol; col < line.length; col += 1) {
+      cell = line.getCell(col, cell);
+      if (!cell || cell.getWidth() === 0) continue;
+      const ch = cell.getChars();
+      if (ch && ch !== " ") {
+        lastNonBlankCol = col + cell.getWidth();
+      }
+    }
+    return Math.max(lastNonBlankCol, floorCol);
+  },
+
+  countTerminalRowChars(line, fromCol, toCol, buffer) {
     let count = 0;
     let cell = buffer.getNullCell ? buffer.getNullCell() : null;
-    for (let row = startRow; row <= targetRow; row += 1) {
-      const line = buffer.getLine(row);
-      if (!line) break;
-      const limitCol = row === targetRow ? Math.min(targetCol, line.length) : line.length;
-      for (let col = 0; col < limitCol; col += 1) {
-        cell = line.getCell(col, cell);
-        if (!cell) continue;
-        if (cell.getWidth() > 0) {
-          count += 1;
-        }
+    const startCol = Math.max(0, fromCol);
+    const endCol = Math.min(Math.max(startCol, toCol), line.length);
+    for (let col = startCol; col < endCol; col += 1) {
+      cell = line.getCell(col, cell);
+      if (!cell) continue;
+      if (cell.getWidth() > 0) {
+        count += 1;
       }
     }
     return count;
-  },
-
-  getTerminalLineEndOffset(buffer, startRow, endRow, cursorOffset) {
-    let lastNonEmpty = 0;
-    let total = 0;
-    let cell = buffer.getNullCell ? buffer.getNullCell() : null;
-    for (let row = startRow; row <= endRow; row += 1) {
-      const line = buffer.getLine(row);
-      if (!line) break;
-      for (let col = 0; col < line.length; col += 1) {
-        cell = line.getCell(col, cell);
-        if (!cell) continue;
-        if (cell.getWidth() > 0) {
-          total += 1;
-          const ch = cell.getChars();
-          if (ch && ch !== " ") {
-            lastNonEmpty = total;
-          }
-        }
-      }
-    }
-    return Math.max(lastNonEmpty, cursorOffset);
   },
 
   deleteTerminalSelection(tab) {
@@ -2891,22 +2896,76 @@ const App = {
     }
 
     const cursorRow = buffer.baseY + buffer.cursorY;
-    const { startRow, endRow } = this.getTerminalLogicalLineRange(buffer, cursorRow);
-    if (start.y < startRow || end.y > endRow) {
+    const wrappedRange = this.getTerminalLogicalLineRange(buffer, cursorRow);
+    const promptInfo = this.getTerminalPromptBoundary(buffer, cursorRow);
+
+    let activeStartRow = wrappedRange.startRow;
+    let activeStartCol = 0;
+    let activeEndRow = wrappedRange.endRow;
+
+    if (promptInfo && promptInfo.promptRow <= wrappedRange.startRow) {
+      activeStartRow = promptInfo.promptRow;
+      activeStartCol = promptInfo.promptEndCol;
+      for (let row = activeEndRow + 1; row < buffer.length; row += 1) {
+        const line = buffer.getLine(row);
+        if (!line) break;
+        const text = line.translateToString(true);
+        if (!text && !line.isWrapped) break;
+        activeEndRow = row;
+      }
+    } else if (start.y < wrappedRange.startRow || end.y > wrappedRange.endRow) {
       return false;
     }
 
-    const cursorOffset = this.countTerminalChars(buffer, startRow, cursorRow, buffer.cursorX);
-    const lineEndOffset = this.getTerminalLineEndOffset(buffer, startRow, endRow, cursorOffset);
-    const selStartOffset = this.countTerminalChars(buffer, startRow, start.y, start.x);
-    const selEndOffset = Math.min(
-      this.countTerminalChars(buffer, startRow, end.y, end.x),
-      lineEndOffset
-    );
+    if (start.y < activeStartRow || end.y > activeEndRow) {
+      return false;
+    }
+
+    // Build per-row offset metadata across the active input region so both
+    // soft-wrapped rows and multi-line bracketed-paste rows (\n) map accurately.
+    const rowMeta = [];
+    let runningOffset = 0;
+    for (let row = activeStartRow; row <= activeEndRow; row += 1) {
+      const line = buffer.getLine(row);
+      if (!line) break;
+      const minCol = row === activeStartRow ? activeStartCol : 0;
+      const nextLine = row + 1 <= activeEndRow ? buffer.getLine(row + 1) : null;
+      const wrapsToNext = Boolean(nextLine && nextLine.isWrapped);
+      const floorCol = row === cursorRow ? Math.max(minCol, buffer.cursorX) : minCol;
+      const maxCol = wrapsToNext
+        ? line.length
+        : this.getTerminalRowTextEndCol(line, minCol, floorCol, buffer);
+      const rowChars = this.countTerminalRowChars(line, minCol, maxCol, buffer);
+      const hasNewline = row < activeEndRow && !wrapsToNext;
+
+      rowMeta[row] = {
+        minCol,
+        maxCol,
+        startOffset: runningOffset,
+        endOffset: runningOffset + rowChars,
+      };
+      runningOffset += rowChars + (hasNewline ? 1 : 0);
+    }
+
+    const offsetAt = (row, col) => {
+      const meta = rowMeta[row];
+      if (!meta) return 0;
+      const line = buffer.getLine(row);
+      if (!line) return meta.startOffset;
+      const clampedCol = Math.min(Math.max(col, meta.minCol), meta.maxCol);
+      return meta.startOffset + this.countTerminalRowChars(line, meta.minCol, clampedCol, buffer);
+    };
+
+    const cursorOffset = offsetAt(cursorRow, buffer.cursorX);
+    const selStartOffset = offsetAt(start.y, start.x);
+    const selEndOffset = offsetAt(end.y, end.x);
 
     const deleteCount = selEndOffset - selStartOffset;
     if (deleteCount <= 0) {
       tab.instance.clearSelection();
+      return false;
+    }
+    if (deleteCount > 20000) {
       return false;
     }
 
