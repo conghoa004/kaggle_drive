@@ -2526,7 +2526,7 @@ const App = {
       const response = await API.getTerminalSessions();
       serverSessions = Array.isArray(response.sessions) ? response.sessions : [];
     } catch (_) {
-      serverSessions = [];
+      return;
     }
     if (this.terminalTabs.length) return;
 
@@ -2543,7 +2543,7 @@ const App = {
       }
     }
 
-    const candidates = serverSessions.filter(session => !session.attached);
+    const candidates = serverSessions;
     if (!candidates.length) return;
 
     const usedSessionIds = new Set();

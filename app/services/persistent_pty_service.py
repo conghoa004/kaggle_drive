@@ -31,6 +31,12 @@ _TERMINAL_SESSIONS: Dict[str, "_TerminalSession"] = {}
 
 
 @dataclass
+class _TerminalConnection:
+    websocket: WebSocket
+    output_queue: asyncio.Queue
+
+
+@dataclass
 class _TerminalSession:
     session_id: str
     cwd: Path
@@ -43,8 +49,7 @@ class _TerminalSession:
     history: Deque[bytes] = field(default_factory=deque)
     history_bytes: int = 0
     history_truncated: bool = False
-    websocket: Optional[WebSocket] = None
-    output_queue: Optional[asyncio.Queue] = None
+    connections: Dict[int, _TerminalConnection] = field(default_factory=dict)
     reader_paused: bool = False
     exited: bool = False
     closed: bool = False
@@ -141,7 +146,7 @@ class PtyTerminalService:
                 expired_candidates = [
                     item
                     for item in _TERMINAL_SESSIONS.values()
-                    if item.exited and item.websocket is None
+                    if item.exited and not item.connections
                 ]
                 if not expired_candidates:
                     break
@@ -186,7 +191,7 @@ class PtyTerminalService:
             except Exception:
                 pass
         finally:
-            if session.websocket is None and not session.closed:
+            if not session.connections and not session.closed:
                 PtyTerminalService._schedule_idle_expiry(session)
             try:
                 await websocket.close(code=1000)
@@ -301,8 +306,10 @@ class PtyTerminalService:
         if fd is None or session.closed or session.exited:
             return
 
-        queue = session.output_queue
-        if session.websocket is not None and queue is not None and queue.full():
+        if any(
+            connection.output_queue.full()
+            for connection in session.connections.values()
+        ):
             try:
                 session.loop.remove_reader(fd)
             except Exception:
@@ -325,16 +332,15 @@ class PtyTerminalService:
             session.loop.create_task(
                 asyncio.to_thread(PtyTerminalService._close_pty_fd, session, fd)
             )
-            queue = session.output_queue
-            if queue is not None and not queue.full():
-                queue.put_nowait(None)
+            for connection in list(session.connections.values()):
+                if not connection.output_queue.full():
+                    connection.output_queue.put_nowait(None)
             session.loop.create_task(asyncio.to_thread(session.process.wait))
             return
 
         PtyTerminalService._append_history(session, chunk)
-        queue = session.output_queue
-        if session.websocket is not None and queue is not None:
-            queue.put_nowait(chunk)
+        for connection in list(session.connections.values()):
+            connection.output_queue.put_nowait(chunk)
 
     @staticmethod
     def _resume_reader(session: _TerminalSession) -> None:
@@ -352,8 +358,9 @@ class PtyTerminalService:
     async def _send_output(
         websocket: WebSocket,
         session: _TerminalSession,
-        queue: asyncio.Queue,
+        connection: _TerminalConnection,
     ) -> None:
+        queue = connection.output_queue
         while True:
             chunk = await queue.get()
             if chunk is None:
@@ -365,7 +372,9 @@ class PtyTerminalService:
             if session.exited and queue.empty():
                 await websocket.send_json({"type": "exit"})
                 return
-            if session.reader_paused and not queue.full():
+            if session.reader_paused and not any(
+                item.output_queue.full() for item in session.connections.values()
+            ):
                 PtyTerminalService._resume_reader(session)
 
     @staticmethod
@@ -412,20 +421,16 @@ class PtyTerminalService:
         replay: bool,
         resumed: bool,
     ) -> None:
-        previous_socket = session.websocket
-        if previous_socket is not None and previous_socket is not websocket:
-            try:
-                await previous_socket.close(code=1012, reason="Terminal reconnected")
-            except Exception:
-                pass
-
         if session.idle_task is not None:
             session.idle_task.cancel()
             session.idle_task = None
 
-        session.websocket = websocket
-        queue: asyncio.Queue = asyncio.Queue(maxsize=TERMINAL_OUTPUT_QUEUE_CHUNKS)
-        session.output_queue = queue
+        connection = _TerminalConnection(
+            websocket=websocket,
+            output_queue=asyncio.Queue(maxsize=TERMINAL_OUTPUT_QUEUE_CHUNKS),
+        )
+        connection_key = id(websocket)
+        session.connections[connection_key] = connection
         history = b"".join(session.history) if replay or not resumed else b""
         was_truncated = session.history_truncated and replay
 
@@ -448,7 +453,7 @@ class PtyTerminalService:
                 PtyTerminalService._resume_reader(session)
 
             output_task = asyncio.create_task(
-                PtyTerminalService._send_output(websocket, session, queue)
+                PtyTerminalService._send_output(websocket, session, connection)
             )
             input_task = asyncio.create_task(
                 PtyTerminalService._receive_input(websocket, session)
@@ -466,17 +471,15 @@ class PtyTerminalService:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
         finally:
-            if session.websocket is websocket:
-                session.websocket = None
-                session.output_queue = None
-                if session.reader_paused:
-                    PtyTerminalService._resume_reader(session)
-                if not session.closed:
-                    PtyTerminalService._schedule_idle_expiry(session)
+            session.connections.pop(connection_key, None)
+            if session.reader_paused:
+                PtyTerminalService._resume_reader(session)
+            if not session.closed and not session.connections:
+                PtyTerminalService._schedule_idle_expiry(session)
 
     @staticmethod
     def _schedule_idle_expiry(session: _TerminalSession) -> None:
-        if session.closed or session.websocket is not None:
+        if session.closed or session.connections:
             return
         if session.idle_task is not None:
             session.idle_task.cancel()
@@ -490,7 +493,7 @@ class PtyTerminalService:
             await asyncio.sleep(TERMINAL_IDLE_TTL_SECONDS)
             if (
                 _TERMINAL_SESSIONS.get(session.session_id) is session
-                and session.websocket is None
+                and not session.connections
             ):
                 await PtyTerminalService._terminate_session(session)
         except asyncio.CancelledError:
@@ -506,7 +509,7 @@ class PtyTerminalService:
                 "session_id": session.session_id,
                 "cwd": str(session.cwd),
                 "exited": session.exited,
-                "attached": session.websocket is not None,
+                "attached": bool(session.connections),
             }
             for session in sorted(
                 _TERMINAL_SESSIONS.values(),
@@ -534,8 +537,8 @@ class PtyTerminalService:
             except Exception:
                 pass
 
-        queue = session.output_queue
-        if queue is not None:
+        for connection in list(session.connections.values()):
+            queue = connection.output_queue
             while queue.full():
                 try:
                     queue.get_nowait()
