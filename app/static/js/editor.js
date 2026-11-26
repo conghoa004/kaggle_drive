@@ -7,6 +7,8 @@ const Editor = {
   currentFileEncoding: "utf-8",
   currentFileNewline: "\n",
   isDirty: false,
+  isSaving: false,
+  openRequestSequence: 0,
   aceInstance: null,
   fontSize: 14,
   isWrapped: true,
@@ -155,14 +157,30 @@ const Editor = {
     if (window.App && typeof App.hideContextMenu === "function") {
       App.hideContextMenu();
     }
+    if (this.isSaving) {
+      UI.toast(t("editor_saving"), "warning");
+      return;
+    }
+    if (this.isDirty) {
+      this.promptUnsavedChanges();
+      return;
+    }
+    const requestSequence = ++this.openRequestSequence;
     try {
       UI.toast(t("editor_loading_toast"), "info", 1500);
       const data = await API.getFileContent(path);
+      if (requestSequence !== this.openRequestSequence) return;
+      if (this.isDirty) {
+        this.openRequestSequence += 1;
+        this.promptUnsavedChanges();
+        return;
+      }
       const editorContent = this.stripAnsiColors(data.content || "");
 
       this.currentFilePath = data.path;
       this.currentFileEncoding = data.encoding || "utf-8";
       this.currentFileNewline = data.newline || "\n";
+      this.updateFileFormatInfo();
 
       const titleEl = document.getElementById("editorFileName");
       if (titleEl) titleEl.textContent = data.name;
@@ -200,6 +218,7 @@ const Editor = {
         }, 100);
       }
     } catch (err) {
+      if (requestSequence !== this.openRequestSequence) return;
       UI.toast(err.message, "error");
     }
   },
@@ -217,6 +236,17 @@ const Editor = {
     const dirtyIndicator = document.getElementById("editorDirtyIndicator");
     if (dirtyIndicator) {
       dirtyIndicator.style.display = dirty ? "inline-block" : "none";
+    }
+  },
+
+  updateFileFormatInfo() {
+    const encodingEl = document.getElementById("editorEncodingInfo");
+    const newlineEl = document.getElementById("editorNewlineInfo");
+    if (encodingEl) encodingEl.textContent = this.currentFileEncoding.toUpperCase();
+    if (newlineEl) {
+      newlineEl.textContent = this.currentFileNewline === "\r\n"
+        ? "CRLF"
+        : this.currentFileNewline === "\r" ? "CR" : "LF";
     }
   },
 
@@ -299,11 +329,25 @@ const Editor = {
     }
   },
 
+  setEditorReadOnly(readOnly) {
+    if (this.aceInstance) {
+      this.aceInstance.setReadOnly(readOnly);
+      return;
+    }
+    const textarea = document.getElementById("editorTextarea");
+    if (textarea) textarea.readOnly = readOnly;
+  },
+
   async saveCurrentFile() {
-    if (!this.currentFilePath || !this.isDirty) return;
+    if (!this.currentFilePath || !this.isDirty || this.isSaving) return;
 
     const content = this.getContent();
+    const savePath = this.currentFilePath;
+    const saveEncoding = this.currentFileEncoding;
+    const saveNewline = this.currentFileNewline;
     const saveBtn = document.getElementById("editorSaveBtn");
+    this.isSaving = true;
+    this.setEditorReadOnly(true);
 
     if (saveBtn) {
       saveBtn.disabled = true;
@@ -312,17 +356,19 @@ const Editor = {
 
     try {
       await API.saveFileContent(
-        this.currentFilePath,
+        savePath,
         content,
-        this.currentFileEncoding,
-        this.currentFileNewline
+        saveEncoding,
+        saveNewline
       );
-      this.setDirty(false);
+      this.setDirty(this.getContent() !== content);
       UI.toast(t("editor_saved_toast"), "success");
       App.loadDirectory(AppState.currentPath, false);
     } catch (err) {
       UI.toast(t("editor_save_error", { msg: err.message }), "error");
     } finally {
+      this.isSaving = false;
+      this.setEditorReadOnly(false);
       if (saveBtn) {
         saveBtn.disabled = false;
         saveBtn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span>${t("editor_save_btn")}</span>`;
@@ -331,6 +377,10 @@ const Editor = {
   },
 
   close() {
+    if (this.isSaving) {
+      UI.toast(t("editor_saving"), "warning");
+      return;
+    }
     if (this.isDirty) {
       this.promptUnsavedChanges();
       return;
@@ -378,11 +428,15 @@ const Editor = {
   },
 
   doClose() {
+    this.openRequestSequence += 1;
     this.currentFilePath = null;
     this.currentFileEncoding = "utf-8";
     this.currentFileNewline = "\n";
     this.isDirty = false;
+    this.updateFileFormatInfo();
     const modal = document.getElementById("editorModal");
     if (modal) modal.classList.remove("show");
   }
 };
+
+window.Editor = Editor;

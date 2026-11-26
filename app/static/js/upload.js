@@ -69,7 +69,8 @@ const Uploader = {
 
   init() {
     window.addEventListener("beforeunload", event => {
-      if (!this.isUploading) return;
+      const editorHasUnsavedChanges = Boolean(window.Editor && window.Editor.isDirty);
+      if (!this.isUploading && !editorHasUnsavedChanges) return;
       event.preventDefault();
       event.returnValue = "";
     });
