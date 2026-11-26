@@ -256,6 +256,10 @@
           <i class="fa-solid fa-folder-open icon-folder"></i>
           <span data-i18n="nav_storage">Bộ nhớ</span>
         </div>
+        <div class="pinned-folder-section">
+          <div class="pinned-folder-heading" data-i18n="pinned_folders">Thư mục đã ghim</div>
+          <div id="pinnedFolderList"></div>
+        </div>
         <div id="navPorts" class="nav-link" onclick="App.openPortsPage()">
           <i class="fa-solid fa-network-wired text-orange-500"></i>
           <span data-i18n="nav_ports">Ports Manager</span>
@@ -295,6 +299,10 @@
                 <i class="fa-solid fa-house-chimney icon-python"></i> working
               </span>
             </nav>
+            <button id="btnPinCurrentFolder" type="button" class="btn-tool shrink-0 hidden" onclick="App.toggleCurrentFolderPin()">
+              <i id="pinCurrentFolderIcon" class="fa-solid fa-thumbtack"></i>
+              <span id="pinCurrentFolderLabel" data-i18n="pin_folder">Ghim thư mục</span>
+            </button>
           </div>
 
           <!-- Action Toolbar -->

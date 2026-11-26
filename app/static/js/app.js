@@ -7,6 +7,7 @@ const AppState = {
   storagePath: localStorage.getItem("kaggle_drive_storage_path") || "",
   parentPath: null,
   rootDir: "",
+  pinnedFolders: [],
   files: [],
   selectedItems: new Set(),
   fileClipboard: null,
@@ -22,6 +23,7 @@ const AppState = {
 const App = {
   clipboardPasteInProgress: false,
   directoryLoadSequence: 0,
+  pinnedFolderStorageKey: "kaggle_drive_pinned_folders",
 
   init() {
     I18n.init();
@@ -34,6 +36,7 @@ const App = {
 
   onLanguageChange() {
     this.renderBreadcrumb();
+    this.renderPinnedFolders();
     this.renderFiles();
     this.updateSelectionBar();
     this.updateFileClipboardBar();
@@ -177,6 +180,95 @@ const App = {
     this.loadDirectory(AppState.storagePath || "", true);
   },
 
+  loadPinnedFolders() {
+    let saved = [];
+    try {
+      saved = JSON.parse(localStorage.getItem(this.pinnedFolderStorageKey) || "[]");
+    } catch (_) {}
+    const seen = new Set();
+    AppState.pinnedFolders = Array.isArray(saved)
+      ? saved
+        .filter(path => typeof path === "string")
+        .map(path => path.split("/").filter(Boolean).join("/"))
+        .filter(path => path && !seen.has(path) && seen.add(path))
+      : [];
+    this.renderPinnedFolders();
+    this.renderCurrentFolderPinButton();
+  },
+
+  persistPinnedFolders() {
+    try {
+      localStorage.setItem(this.pinnedFolderStorageKey, JSON.stringify(AppState.pinnedFolders));
+    } catch (_) {}
+  },
+
+  toggleCurrentFolderPin() {
+    const path = String(AppState.currentPath || "").split("/").filter(Boolean).join("/");
+    if (!path) return;
+    const name = path.split("/").pop();
+    const index = AppState.pinnedFolders.indexOf(path);
+    if (index >= 0) {
+      AppState.pinnedFolders.splice(index, 1);
+      UI.toast(t("folder_unpinned_toast", { name }), "info");
+    } else {
+      AppState.pinnedFolders.push(path);
+      UI.toast(t("folder_pinned_toast", { name }), "success");
+    }
+    this.persistPinnedFolders();
+    this.renderPinnedFolders();
+    this.renderCurrentFolderPinButton();
+  },
+
+  unpinFolder(folderPath) {
+    const path = String(folderPath || "").split("/").filter(Boolean).join("/");
+    const index = AppState.pinnedFolders.indexOf(path);
+    if (index < 0) return;
+    AppState.pinnedFolders.splice(index, 1);
+    this.persistPinnedFolders();
+    this.renderPinnedFolders();
+    this.renderCurrentFolderPinButton();
+  },
+
+  openPinnedFolder(folderPath) {
+    return this.loadDirectory(folderPath, true);
+  },
+
+  renderPinnedFolders() {
+    const container = document.getElementById("pinnedFolderList");
+    if (!container) return;
+    if (!AppState.pinnedFolders.length) {
+      container.innerHTML = '<div class="pinned-folder-empty">' + UI.escape(t("pinned_folders_empty")) + "</div>";
+      return;
+    }
+
+    container.innerHTML = AppState.pinnedFolders.map(path => {
+      const name = path.split("/").pop() || path;
+      const safePath = UI.inlineJsString(path);
+      const unpinTitle = t("unpin_folder_title", { name });
+      const activeClass = AppState.currentPath === path ? " is-active" : "";
+      return '<div class="pinned-folder-entry' + activeClass + '">' +
+        '<button type="button" class="pinned-folder-open" onclick="App.openPinnedFolder(\'' + safePath + '\')" title="' + UI.escape(path) + '">' +
+          '<i class="fa-solid fa-folder"></i><span class="pinned-folder-name">' + UI.escape(name) + "</span>" +
+        "</button>" +
+        '<button type="button" class="pinned-folder-remove" onclick="App.unpinFolder(\'' + safePath + '\')" title="' + UI.escape(unpinTitle) + '" aria-label="' + UI.escape(unpinTitle) + '">' +
+          '<i class="fa-solid fa-xmark"></i>' +
+        "</button></div>";
+    }).join("");
+  },
+
+  renderCurrentFolderPinButton() {
+    const button = document.getElementById("btnPinCurrentFolder");
+    const icon = document.getElementById("pinCurrentFolderIcon");
+    const label = document.getElementById("pinCurrentFolderLabel");
+    if (!button || !icon || !label) return;
+    const path = String(AppState.currentPath || "").split("/").filter(Boolean).join("/");
+    button.classList.toggle("hidden", !path);
+    const isPinned = Boolean(path && AppState.pinnedFolders.includes(path));
+    icon.className = isPinned ? "fa-solid fa-thumbtack text-amber-500" : "fa-solid fa-thumbtack";
+    label.textContent = t(isPinned ? "unpin_folder" : "pin_folder");
+    button.title = t(isPinned ? "unpin_folder" : "pin_folder");
+  },
+
   refreshCurrentDirectory() {
     return this.loadDirectory(AppState.currentPath, false);
   },
@@ -252,6 +344,7 @@ const App = {
       if (userEl) userEl.textContent = userData.username;
     }
 
+    this.loadPinnedFolders();
     this.restoreTerminalSessions();
 
     const savedNavigation = localStorage.getItem("kaggle_drive_active_navigation");
@@ -324,6 +417,8 @@ const App = {
     this.setActiveNavigation("navStorage");
     AppState.currentPath = normalizedPath;
     AppState.storagePath = normalizedPath;
+    this.renderPinnedFolders();
+    this.renderCurrentFolderPinButton();
     try {
       localStorage.setItem("kaggle_drive_storage_path", normalizedPath);
       localStorage.setItem("kaggle_drive_current_path", normalizedPath);
@@ -389,6 +484,7 @@ const App = {
     }
 
     container.innerHTML = html;
+    this.renderCurrentFolderPinButton();
   },
 
   getVisibleFiles() {

@@ -24,7 +24,6 @@ if os.name != "nt":
 
 
 MAX_TERMINAL_SESSIONS = 10
-TERMINAL_IDLE_TTL_SECONDS = 30 * 60
 TERMINAL_HISTORY_LIMIT_BYTES = 512 * 1024
 TERMINAL_OUTPUT_QUEUE_CHUNKS = 64
 _TERMINAL_SESSIONS: Dict[str, "_TerminalSession"] = {}
@@ -52,7 +51,6 @@ class _TerminalSession:
     reader_paused: bool = False
     exited: bool = False
     closed: bool = False
-    idle_task: Optional[asyncio.Task] = None
 
 
 class PtyTerminalService:
@@ -190,8 +188,6 @@ class PtyTerminalService:
             except Exception:
                 pass
         finally:
-            if not session.connections and not session.closed:
-                PtyTerminalService._schedule_idle_expiry(session)
             try:
                 await websocket.close(code=1000)
             except Exception:
@@ -239,7 +235,6 @@ class PtyTerminalService:
             session = _TerminalSession(session_id, cwd, process, master_fd, loop, owner=owner)
             _TERMINAL_SESSIONS[session_id] = session
             loop.add_reader(master_fd, PtyTerminalService._read_pty, session)
-            PtyTerminalService._schedule_idle_expiry(session)
             return session
         except Exception:
             for fd in (slave_fd, master_fd):
@@ -420,10 +415,6 @@ class PtyTerminalService:
         replay: bool,
         resumed: bool,
     ) -> None:
-        if session.idle_task is not None:
-            session.idle_task.cancel()
-            session.idle_task = None
-
         connection = _TerminalConnection(
             output_queue=asyncio.Queue(maxsize=TERMINAL_OUTPUT_QUEUE_CHUNKS),
         )
@@ -472,30 +463,6 @@ class PtyTerminalService:
             session.connections.pop(connection_key, None)
             if session.reader_paused:
                 PtyTerminalService._resume_reader(session)
-            if not session.closed and not session.connections:
-                PtyTerminalService._schedule_idle_expiry(session)
-
-    @staticmethod
-    def _schedule_idle_expiry(session: _TerminalSession) -> None:
-        if session.closed or session.connections:
-            return
-        if session.idle_task is not None:
-            session.idle_task.cancel()
-        session.idle_task = session.loop.create_task(
-            PtyTerminalService._expire_idle_session(session)
-        )
-
-    @staticmethod
-    async def _expire_idle_session(session: _TerminalSession) -> None:
-        try:
-            await asyncio.sleep(TERMINAL_IDLE_TTL_SECONDS)
-            if (
-                _TERMINAL_SESSIONS.get(session.session_id) is session
-                and not session.connections
-            ):
-                await PtyTerminalService._terminate_session(session)
-        except asyncio.CancelledError:
-            pass
 
     @staticmethod
     def list_sessions(owner: str) -> List[Dict[str, object]]:
@@ -520,12 +487,6 @@ class PtyTerminalService:
             return
         session.closed = True
         _TERMINAL_SESSIONS.pop(session.session_id, None)
-
-        if session.idle_task is not None:
-            current_task = asyncio.current_task()
-            if session.idle_task is not current_task:
-                session.idle_task.cancel()
-            session.idle_task = None
 
         if session.master_fd is not None:
             try:

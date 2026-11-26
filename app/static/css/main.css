@@ -108,6 +108,80 @@
   font-size: 15px;
 }
 
+.pinned-folder-section {
+  margin: 2px 0 8px 12px;
+}
+
+.pinned-folder-heading {
+  padding: 5px 8px 4px;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pinned-folder-entry {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 9px;
+  color: #64748b;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pinned-folder-entry:hover,
+.pinned-folder-entry.is-active {
+  background: #f1f5f9;
+  color: #2563eb;
+}
+
+.pinned-folder-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.pinned-folder-open i {
+  flex: 0 0 16px;
+  text-align: center;
+  color: #f59e0b;
+}
+
+.pinned-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-folder-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  height: 28px;
+  margin-right: 3px;
+  border-radius: 6px;
+  color: #94a3b8;
+}
+
+.pinned-folder-remove:hover {
+  background: #fee2e2;
+  color: #e11d48;
+}
+
+.pinned-folder-empty {
+  padding: 5px 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 /* Breadcrumb Crumb */
 .breadcrumb-crumb {
   color: #64748b;
