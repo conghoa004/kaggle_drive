@@ -68,6 +68,11 @@ const Uploader = {
   },
 
   init() {
+    window.addEventListener("beforeunload", event => {
+      if (!this.isUploading) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
     this.setupGlobalDragDrop();
     this.setupFileInputs();
   },
