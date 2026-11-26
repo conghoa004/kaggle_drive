@@ -2778,6 +2778,7 @@ const App = {
     tab.instance.loadAddon(tab.fitAddon);
     tab.instance.open(container);
     this.setupTerminalClipboard(tab, container);
+    this.setupTerminalClickCursor(tab, container);
     tab.instance.onData(data => this.sendTerminalInput(data, tab));
     tab.resizeObserver = new ResizeObserver(() => this.fitTerminal(tab));
     tab.resizeObserver.observe(container);
@@ -2968,19 +2969,8 @@ const App = {
     return count;
   },
 
-  deleteTerminalSelection(tab) {
-    if (!tab || !tab.instance || !tab.instance.hasSelection()) return false;
-    if (typeof tab.instance.getSelectionPosition !== "function") return false;
-
-    const buffer = tab.instance.buffer && tab.instance.buffer.active;
-    if (!buffer || buffer.type === "alternate") return false;
-
-    const pos = tab.instance.getSelectionPosition();
-    if (!pos || !pos.start || !pos.end) return false;
-
-    const bounds = this.resolveTerminalSelectionBounds(tab, buffer, pos);
-    const start = { x: bounds.startCol, y: bounds.startRow };
-    const end = { x: bounds.endCol, y: bounds.endRow };
+  getTerminalActiveInputRegion(buffer) {
+    if (!buffer || buffer.type === "alternate") return null;
 
     const cursorRow = buffer.baseY + buffer.cursorY;
     const wrappedRange = this.getTerminalLogicalLineRange(buffer, cursorRow);
@@ -3000,12 +2990,6 @@ const App = {
         if (!text && !line.isWrapped) break;
         activeEndRow = row;
       }
-    } else if (start.y < wrappedRange.startRow || end.y > wrappedRange.endRow) {
-      return false;
-    }
-
-    if (start.y < activeStartRow || end.y > activeEndRow) {
-      return false;
     }
 
     // Build per-row offset metadata across the active input region so both
@@ -3043,9 +3027,41 @@ const App = {
       return meta.startOffset + this.countTerminalRowChars(line, meta.minCol, clampedCol, buffer);
     };
 
-    const cursorOffset = offsetAt(cursorRow, buffer.cursorX);
-    const selStartOffset = offsetAt(start.y, start.x);
-    const selEndOffset = offsetAt(end.y, end.x);
+    return {
+      cursorRow,
+      wrappedRange,
+      hasPrompt: Boolean(promptInfo && promptInfo.promptRow <= wrappedRange.startRow),
+      activeStartRow,
+      activeEndRow,
+      cursorOffset: offsetAt(cursorRow, buffer.cursorX),
+      offsetAt,
+    };
+  },
+
+  deleteTerminalSelection(tab) {
+    if (!tab || !tab.instance || !tab.instance.hasSelection()) return false;
+    if (typeof tab.instance.getSelectionPosition !== "function") return false;
+
+    const buffer = tab.instance.buffer && tab.instance.buffer.active;
+    const region = this.getTerminalActiveInputRegion(buffer);
+    if (!region) return false;
+
+    const pos = tab.instance.getSelectionPosition();
+    if (!pos || !pos.start || !pos.end) return false;
+
+    const bounds = this.resolveTerminalSelectionBounds(tab, buffer, pos);
+    const start = { x: bounds.startCol, y: bounds.startRow };
+    const end = { x: bounds.endCol, y: bounds.endRow };
+
+    if (!region.hasPrompt && (start.y < region.wrappedRange.startRow || end.y > region.wrappedRange.endRow)) {
+      return false;
+    }
+    if (start.y < region.activeStartRow || end.y > region.activeEndRow) {
+      return false;
+    }
+
+    const selStartOffset = region.offsetAt(start.y, start.x);
+    const selEndOffset = region.offsetAt(end.y, end.x);
 
     const deleteCount = selEndOffset - selStartOffset;
     if (deleteCount <= 0) {
@@ -3056,7 +3072,7 @@ const App = {
       return false;
     }
 
-    const moveDelta = selEndOffset - cursorOffset;
+    const moveDelta = selEndOffset - region.cursorOffset;
     let sequence = "";
     if (moveDelta < 0) {
       sequence += "\x1b[D".repeat(-moveDelta);
@@ -3068,6 +3084,83 @@ const App = {
     tab.instance.clearSelection();
     this.sendTerminalInput(sequence, tab);
     return true;
+  },
+
+  setupTerminalClickCursor(tab, container) {
+    if (!tab || !tab.instance || !container) return;
+    let mouseDownPos = null;
+
+    container.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) {
+        mouseDownPos = null;
+        return;
+      }
+      mouseDownPos = { x: event.clientX, y: event.clientY };
+    });
+
+    container.addEventListener("click", (event) => {
+      const startPos = mouseDownPos;
+      mouseDownPos = null;
+      if (
+        !startPos ||
+        event.button !== 0 ||
+        event.detail > 1 ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+
+      if (Math.hypot(event.clientX - startPos.x, event.clientY - startPos.y) > 4) {
+        return;
+      }
+      if (tab.instance.hasSelection()) return;
+      if (tab.instance.modes && tab.instance.modes.mouseTrackingMode && tab.instance.modes.mouseTrackingMode !== "none") {
+        return;
+      }
+
+      const screenEl = container.querySelector(".xterm-screen");
+      if (!screenEl || !tab.instance.cols || !tab.instance.rows) return;
+      const rect = screenEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      if (
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom
+      ) {
+        return;
+      }
+
+      const buffer = tab.instance.buffer && tab.instance.buffer.active;
+      const region = this.getTerminalActiveInputRegion(buffer);
+      if (!region) return;
+
+      const cellWidth = rect.width / tab.instance.cols;
+      const cellHeight = rect.height / tab.instance.rows;
+      const viewportCol = Math.max(0, Math.min(tab.instance.cols - 1, Math.floor((event.clientX - rect.left) / cellWidth)));
+      const viewportRow = Math.max(0, Math.min(tab.instance.rows - 1, Math.floor((event.clientY - rect.top) / cellHeight)));
+      const clickedRow = buffer.viewportY + viewportRow;
+
+      if (!region.hasPrompt && (clickedRow < region.wrappedRange.startRow || clickedRow > region.wrappedRange.endRow)) {
+        return;
+      }
+      if (clickedRow < region.activeStartRow || clickedRow > region.activeEndRow) {
+        return;
+      }
+
+      const targetOffset = region.offsetAt(clickedRow, viewportCol);
+      const moveDelta = targetOffset - region.cursorOffset;
+      if (moveDelta === 0 || Math.abs(moveDelta) > 20000) return;
+
+      const sequence = moveDelta < 0
+        ? "\x1b[D".repeat(-moveDelta)
+        : "\x1b[C".repeat(moveDelta);
+      this.sendTerminalInput(sequence, tab);
+      tab.instance.focus();
+    });
   },
 
   setupTerminalClipboard(tab, container) {
