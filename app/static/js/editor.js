@@ -147,6 +147,10 @@ const Editor = {
     tabIcon.className = icons[ext.toLowerCase()] || "fa-solid fa-file-code text-brand-400";
   },
 
+  stripAnsiColors(content) {
+    return String(content || "").replace(/\x1b\[[0-?]*[ -/]*m/g, "");
+  },
+
   async openFile(path) {
     if (window.App && typeof App.hideContextMenu === "function") {
       App.hideContextMenu();
@@ -154,6 +158,7 @@ const Editor = {
     try {
       UI.toast(t("editor_loading_toast"), "info", 1500);
       const data = await API.getFileContent(path);
+      const editorContent = this.stripAnsiColors(data.content || "");
 
       this.currentFilePath = data.path;
       this.currentFileEncoding = data.encoding || "utf-8";
@@ -175,11 +180,11 @@ const Editor = {
         this.aceInstance.session.setNewLineMode(
           this.currentFileNewline === "\r\n" ? "windows" : "unix"
         );
-        this.aceInstance.setValue(data.content || "", -1);
+        this.aceInstance.setValue(editorContent, -1);
         this.aceInstance.clearSelection();
       } else {
         const textarea = document.getElementById("editorTextarea");
-        if (textarea) textarea.value = data.content || "";
+        if (textarea) textarea.value = editorContent;
       }
 
       this.isDirty = false;
@@ -295,7 +300,7 @@ const Editor = {
   },
 
   async saveCurrentFile() {
-    if (!this.currentFilePath) return;
+    if (!this.currentFilePath || !this.isDirty) return;
 
     const content = this.getContent();
     const saveBtn = document.getElementById("editorSaveBtn");
