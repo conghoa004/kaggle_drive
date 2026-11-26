@@ -3058,20 +3058,29 @@ const App = {
     if (!pos || !pos.start || !pos.end) return false;
 
     const bounds = this.resolveTerminalSelectionBounds(tab, buffer, pos);
-    if (bounds.startRow < region.activeStartRow || bounds.endRow > region.activeEndRow) {
-      return false;
+    const selectionStartRow = Math.max(bounds.startRow, region.activeStartRow);
+    const selectionEndRow = Math.min(bounds.endRow, region.activeEndRow);
+    if (selectionStartRow > selectionEndRow) {
+      tab.instance.clearSelection();
+      return true;
     }
 
-    const selStartOffset = region.offsetAt(bounds.startRow, bounds.startCol);
-    const selEndOffset = region.offsetAt(bounds.endRow, bounds.endCol);
+    const selectionStartCol = bounds.startRow < selectionStartRow ? 0 : bounds.startCol;
+    const selectionEndLine = buffer.getLine(selectionEndRow);
+    const selectionEndCol = bounds.endRow > selectionEndRow
+      ? (selectionEndLine ? selectionEndLine.length : 0)
+      : bounds.endCol;
+    const selStartOffset = region.offsetAt(selectionStartRow, selectionStartCol);
+    const selEndOffset = region.offsetAt(selectionEndRow, selectionEndCol);
 
     const deleteCount = selEndOffset - selStartOffset;
     if (deleteCount <= 0) {
       tab.instance.clearSelection();
-      return false;
+      return true;
     }
     if (deleteCount > 20000) {
-      return false;
+      tab.instance.clearSelection();
+      return true;
     }
 
     const sequence =
@@ -3170,7 +3179,8 @@ const App = {
 
       if (!event.altKey && tab.instance.hasSelection()) {
         if (event.key === "Backspace" || event.key === "Delete") {
-          if (this.deleteTerminalSelection(tab)) {
+          const hasSelection = tab.instance.hasSelection();
+          if (this.deleteTerminalSelection(tab) || hasSelection) {
             event.preventDefault();
             return false;
           }
