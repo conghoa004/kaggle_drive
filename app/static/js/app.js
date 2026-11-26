@@ -72,6 +72,7 @@ const App = {
         this.hideContextMenu();
         const unsavedModal = document.getElementById("unsavedChangesModal");
         if (unsavedModal && unsavedModal.classList.contains("show")) {
+          e.stopImmediatePropagation();
           UI.closeModal("unsavedChangesModal");
           return;
         }
@@ -81,7 +82,7 @@ const App = {
         }
         UI.closeAllModals();
       } else if ((e.key === "Delete" || (e.ctrlKey && e.key === "Backspace")) && !isEditable) {
-        if (AppState.selectedItems.size > 0 && !hasOpenModal) {
+        if (isFileManagerVisible && AppState.selectedItems.size > 0 && !hasOpenModal) {
           e.preventDefault();
           this.promptDelete();
         }
@@ -391,14 +392,25 @@ const App = {
     container.innerHTML = html;
   },
 
+  getVisibleFiles() {
+    if (!AppState.searchQuery) return AppState.files;
+    return AppState.files.filter(f => f.name.toLowerCase().includes(AppState.searchQuery));
+  },
+
+  isTextEditableItem(item) {
+    if (!item || item.is_dir) return false;
+    const ext = (item.extension || "").toLowerCase();
+    return (
+      ["code", "text", "markdown"].includes(item.category) ||
+      ["csv", "tsv"].includes(ext)
+    ) && !["xlsx", "xls"].includes(ext);
+  },
+
   renderFiles() {
     const container = document.getElementById("fileViewContainer");
     if (!container) return;
 
-    let filtered = AppState.files;
-    if (AppState.searchQuery) {
-      filtered = filtered.filter(f => f.name.toLowerCase().includes(AppState.searchQuery));
-    }
+    const filtered = this.getVisibleFiles();
 
     if (!filtered.length) {
       container.innerHTML = `
@@ -501,7 +513,7 @@ const App = {
                 ${(item.extension || "").toLowerCase() === "sh" ? `
                   <button class="table-btn-action" title="${t("action_run_shell_script")}" onclick="App.runShellScript('${safePath}')"><i class="fa-solid fa-play"></i></button>
                 ` : ''}
-                ${['code', 'text', 'markdown', 'csv'].includes(item.category) ? `
+                ${this.isTextEditableItem(item) ? `
                   <button class="table-btn-action" title="${t("action_edit")}" onclick="Editor.openFile('${safePath}')"><i class="fa-solid fa-pen-to-square"></i></button>
                 ` : ''}
               ` : `
@@ -530,7 +542,7 @@ const App = {
     const isShift = event.shiftKey;
 
     if (isShift && AppState.lastSelectedPath) {
-      const items = AppState.files.map(f => f.path);
+      const items = this.getVisibleFiles().map(f => f.path);
       const fromIdx = items.indexOf(AppState.lastSelectedPath);
       const toIdx = items.indexOf(path);
       if (fromIdx !== -1 && toIdx !== -1) {
@@ -661,8 +673,9 @@ const App = {
     // 3. Table Header select-all checkbox
     const selectAllCb = document.getElementById("selectAllCheckbox");
     if (selectAllCb) {
-      const total = AppState.files.length;
-      const count = AppState.selectedItems.size;
+      const visible = this.getVisibleFiles();
+      const total = visible.length;
+      const count = visible.filter(f => AppState.selectedItems.has(f.path)).length;
       selectAllCb.checked = total > 0 && count === total;
       selectAllCb.indeterminate = count > 0 && count < total;
     }
@@ -690,7 +703,7 @@ const App = {
 
   toggleSelectAll(checked) {
     if (checked) {
-      AppState.files.forEach(f => AppState.selectedItems.add(f.path));
+      this.getVisibleFiles().forEach(f => AppState.selectedItems.add(f.path));
     } else {
       AppState.selectedItems.clear();
       AppState.lastSelectedPath = null;
@@ -1111,7 +1124,7 @@ const App = {
         `;
       } else {
         const isSpreadsheet = ['spreadsheet', 'csv'].includes(item.category) || ['xlsx', 'xls', 'csv', 'tsv'].includes((item.extension || '').toLowerCase());
-        const isEditable = (['code', 'text', 'markdown'].includes(item.category) || ['csv', 'tsv'].includes((item.extension || '').toLowerCase())) && !['xlsx', 'xls'].includes((item.extension || '').toLowerCase());
+        const isEditable = this.isTextEditableItem(item);
         const isArchive = ['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', 'rar'].includes((item.extension || '').toLowerCase());
         const isShellScript = (item.extension || '').toLowerCase() === 'sh';
 
@@ -1966,7 +1979,7 @@ const App = {
           <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.previewItem('${safePath}')">
             <i class="fa-solid fa-eye"></i> ${t("action_preview")}
           </button>
-          ${['code', 'text', 'markdown', 'csv'].includes(item.category) ? `
+          ${this.isTextEditableItem(item) ? `
             <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); Editor.openFile('${safePath}')">
               <i class="fa-solid fa-pen-to-square"></i> ${t("action_edit")}
             </button>

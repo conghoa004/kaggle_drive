@@ -10,11 +10,18 @@ from app.config import settings
 from app.services.tunnel_service import CloudflareTunnelService
 
 
+_LOOPBACK_REACHABLE_ADDRESSES = frozenset(
+    {"127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1", "::"}
+)
+
+
 class PortManager:
     """Lists local TCP listeners and controls one Cloudflare quick tunnel per port."""
 
     def __init__(self):
         self._tunnels: Dict[int, CloudflareTunnelService] = {}
+        self._starting_ports = set()
+        self._shutting_down = False
         self._lock = threading.RLock()
 
     @staticmethod
@@ -49,7 +56,7 @@ class PortManager:
                     continue
 
                 # cloudflared targets 127.0.0.1, so omit listeners unreachable there.
-                if address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+                if address not in _LOOPBACK_REACHABLE_ADDRESSES:
                     continue
                 item = ports.setdefault(port, {"port": port, "addresses": set()})
                 item["addresses"].add(address)
@@ -82,7 +89,7 @@ class PortManager:
                     address, port = local_address[0], local_address[1]
 
                 # cloudflared targets 127.0.0.1, so omit listeners unreachable there.
-                if address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+                if address not in _LOOPBACK_REACHABLE_ADDRESSES:
                     continue
 
                 port = int(port)
@@ -146,7 +153,7 @@ class PortManager:
                 except (ValueError, OSError):
                     continue
 
-                if address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+                if address not in _LOOPBACK_REACHABLE_ADDRESSES:
                     continue
                 found_listener = True
                 if fields[9] != "0":
@@ -205,7 +212,7 @@ class PortManager:
                 address, listening_port = local_address.ip, local_address.port
             else:
                 address, listening_port = local_address[0], local_address[1]
-            if int(listening_port) != port or address not in ("127.0.0.1", "0.0.0.0", "::ffff:127.0.0.1"):
+            if int(listening_port) != port or address not in _LOOPBACK_REACHABLE_ADDRESSES:
                 continue
 
             found_listener = True
@@ -291,16 +298,19 @@ class PortManager:
     def stop_all(self):
         """Stop all quick tunnels created by this manager during app shutdown."""
         with self._lock:
+            self._shutting_down = True
             tunnels = list(self._tunnels.values())
             self._tunnels.clear()
-            for tunnel in tunnels:
-                tunnel.stop_tunnel()
+        for tunnel in tunnels:
+            tunnel.stop_tunnel()
 
     def start_tunnel(self, port: int):
         if port < 1 or port > 65535:
             raise ValueError("Port must be between 1 and 65535.")
 
         with self._lock:
+            if self._shutting_down:
+                raise RuntimeError("Server is shutting down.")
             available = {item["port"] for item in self._listening_ports()}
             if port not in available:
                 raise ValueError(f"No local TCP service is listening on port {port}.")
@@ -308,23 +318,34 @@ class PortManager:
             existing = self._active_tunnel(port)
             if existing:
                 return {"port": port, **self._tunnel_state(existing)}
+            if port in self._starting_ports:
+                raise RuntimeError(f"Cloudflare Tunnel for port {port} is already starting.")
 
             stale = self._tunnels.pop(port, None)
-            if stale:
-                stale.stop_tunnel()
+            self._starting_ports.add(port)
 
-            tunnel = CloudflareTunnelService()
-            try:
-                url = tunnel.start_tunnel(port, quick=True, verify_public_health=False)
-                if not tunnel.process or tunnel.process.poll() is not None:
-                    raise RuntimeError("Cloudflare Tunnel stopped before it became available.")
+        if stale:
+            stale.stop_tunnel()
+
+        tunnel = CloudflareTunnelService()
+        try:
+            url = tunnel.start_tunnel(port, quick=True, verify_public_health=False)
+            if not tunnel.process or tunnel.process.poll() is not None:
+                raise RuntimeError("Cloudflare Tunnel stopped before it became available.")
+            with self._lock:
+                if self._shutting_down:
+                    tunnel.stop_tunnel()
+                    raise RuntimeError("Server is shutting down.")
                 self._tunnels[port] = tunnel
                 return {"port": port, "active": True, "url": url}
-            except Exception as exc:
-                tunnel.stop_tunnel()
-                if isinstance(exc, RuntimeError):
-                    raise
-                raise RuntimeError(f"Could not start Cloudflare Tunnel: {exc}") from exc
+        except Exception as exc:
+            tunnel.stop_tunnel()
+            if isinstance(exc, RuntimeError):
+                raise
+            raise RuntimeError(f"Could not start Cloudflare Tunnel: {exc}") from exc
+        finally:
+            with self._lock:
+                self._starting_ports.discard(port)
 
     @staticmethod
     def _schedule_process_stop(process):

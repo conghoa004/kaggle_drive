@@ -185,8 +185,12 @@ def verify_credentials(username: str, password: str) -> bool:
     """
     if not username or not password:
         return False
+    expected_user = (settings.USERNAME or "").strip()
+    expected_pass = (settings.PASSWORD or "").strip()
+    if not expected_user or not expected_pass:
+        return False
     return (
-        secrets.compare_digest(username.strip(), settings.USERNAME)
-        and secrets.compare_digest(password.strip(), settings.PASSWORD)
+        secrets.compare_digest(username.strip(), expected_user)
+        and secrets.compare_digest(password.strip(), expected_pass)
     )
 

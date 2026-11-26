@@ -14,6 +14,7 @@ from app.config import settings
 from app.security import get_root_dir, require_auth, get_safe_path
 from app.services.file_service import (
     FileService, MEDIA_MIMETYPES, MAX_EXTRACT_REVIEW_PATHS, _path_to_api,
+    _publish_without_overwrite,
 )
 from app.services.file_operation_manager import file_operation_manager
 
@@ -468,12 +469,11 @@ def upload_file_chunk(
                 chunk_path.replace(dest_path)
             else:
                 try:
-                    os.link(chunk_path, dest_path)
+                    _publish_without_overwrite(chunk_path, dest_path)
                 except FileExistsError:
                     chunk_path.unlink(missing_ok=True)
                     relative_dest = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
                     raise _overwrite_required([relative_dest])
-                chunk_path.unlink()
             return {
                 "status": "success",
                 "filename": dest_path.name,

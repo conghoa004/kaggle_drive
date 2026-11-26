@@ -11,6 +11,9 @@ const Previewer = {
   activeVideo: null,
   activeAudio: null,
   keydownHandler: null,
+  imageMouseMoveHandler: null,
+  imageMouseUpHandler: null,
+  _restoreSearchFocus: false,
 
   // State for interactive image viewer
   imageState: {
@@ -74,9 +77,21 @@ const Previewer = {
     this.doClosePreview();
   },
 
+  cleanupImageListeners() {
+    if (this.imageMouseMoveHandler) {
+      window.removeEventListener("mousemove", this.imageMouseMoveHandler);
+      this.imageMouseMoveHandler = null;
+    }
+    if (this.imageMouseUpHandler) {
+      window.removeEventListener("mouseup", this.imageMouseUpHandler);
+      this.imageMouseUpHandler = null;
+    }
+  },
+
   doClosePreview() {
     this.closeSsContextMenu();
     this.spreadsheetState = null;
+    this.cleanupImageListeners();
 
     // 1. Remove keyboard navigation listener
     if (this.keydownHandler) {
@@ -315,6 +330,7 @@ const Previewer = {
   },
 
   renderImage(item, rawUrl, container) {
+    this.cleanupImageListeners();
     this.imageState = { scale: 1, rotation: 0, panX: 0, panY: 0, isDragging: false, startX: 0, startY: 0 };
     const sizeStr = item.formatted_size || "";
 
@@ -378,19 +394,23 @@ const Previewer = {
         viewport.style.cursor = "grabbing";
       });
 
-      window.addEventListener("mousemove", (e) => {
+      this.imageMouseMoveHandler = (e) => {
         if (!Previewer.imageState.isDragging) return;
         Previewer.imageState.panX = e.clientX - Previewer.imageState.startX;
         Previewer.imageState.panY = e.clientY - Previewer.imageState.startY;
         Previewer.applyImageTransform();
-      });
+      };
 
-      window.addEventListener("mouseup", () => {
+      this.imageMouseUpHandler = () => {
         if (Previewer.imageState.isDragging) {
           Previewer.imageState.isDragging = false;
-          if (viewport) viewport.style.cursor = Previewer.imageState.scale > 1 ? "grab" : "default";
+          const activeViewport = document.getElementById("imgViewport");
+          if (activeViewport) activeViewport.style.cursor = Previewer.imageState.scale > 1 ? "grab" : "default";
         }
-      });
+      };
+
+      window.addEventListener("mousemove", this.imageMouseMoveHandler);
+      window.addEventListener("mouseup", this.imageMouseUpHandler);
 
       // Double-click toggle: fit or 1.6x
       viewport.addEventListener("dblclick", () => {
@@ -988,8 +1008,9 @@ const Previewer = {
       let parsedWb = null;
       let hasBom = false;
 
-      // If SheetJS is loaded, use it to parse XLSX, XLS, CSV, TSV
-      if (window.XLSX) {
+      // Parse binary Excel workbooks via SheetJS and delimited text via UTF-8 text parser
+      // so UTF-8 characters and raw date strings in CSV/TSV are preserved verbatim.
+      if (isExcel && window.XLSX) {
         const resp = await fetch(rawUrl);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
         const arrayBuffer = await resp.arrayBuffer();
@@ -997,7 +1018,6 @@ const Previewer = {
         hasBom = u8.length >= 3 && u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF;
         parsedWb = XLSX.read(u8, {
           type: "array",
-          cellDates: true,
           raw: false
         });
         sheetNames = parsedWb.SheetNames || [];
@@ -1015,7 +1035,9 @@ const Previewer = {
           sheets[sName] = lastNonEmpty >= 0 ? data.slice(0, lastNonEmpty + 1) : [];
         });
       } else {
-        // Fallback for CSV/TSV if XLSX library is not available
+        if (isExcel && !window.XLSX) {
+          throw new Error("Thư viện SheetJS chưa được tải.");
+        }
         const resp = await fetch(rawUrl);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
         const text = await resp.text();
@@ -1329,12 +1351,13 @@ const Previewer = {
       </div>
     `;
 
-    // Keep search input focused if user was typing
+    // Keep search input focused while user is typing (even when cleared to empty)
     const searchEl = document.getElementById("ssSearchInput");
-    if (searchEl && query) {
+    if (searchEl && (this._restoreSearchFocus || query)) {
       searchEl.focus();
       searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length);
     }
+    this._restoreSearchFocus = false;
 
     // Initialize Excel-style edge hover listeners
     this.initSpreadsheetEdgeHover(container);
@@ -1731,6 +1754,7 @@ const Previewer = {
     if (!this.spreadsheetState) return;
     this.spreadsheetState.searchQuery = query;
     this.spreadsheetState.page = 1;
+    this._restoreSearchFocus = true;
     const container = document.getElementById("previewContainer");
     if (container) this.renderSpreadsheetDOM(container);
   },

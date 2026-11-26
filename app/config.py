@@ -20,7 +20,7 @@ class Settings:
     def __init__(self):
         # 1. Root Directory Detection
         env_root = os.getenv("KAGGLE_DRIVE_ROOT")
-        default_root = "/"
+        default_root = "/" if Path("/kaggle/working").exists() else "./workspace"
         self.ROOT_DIR = Path(env_root or default_root).resolve()
         
         # Ensure ROOT_DIR exists
@@ -67,7 +67,7 @@ class Settings:
         # 6. Localization
         self.DEFAULT_LANG = os.getenv("KAGGLE_DRIVE_LANG", "en").lower()
         if self.DEFAULT_LANG not in ("vi", "en", "zh"):
-            self.DEFAULT_LANG = "vi"
+            self.DEFAULT_LANG = "en"
 
 
 settings = Settings()

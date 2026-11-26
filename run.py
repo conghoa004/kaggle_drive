@@ -278,7 +278,7 @@ def main():
     parser.add_argument("--root", default=str(settings.ROOT_DIR), help="Root directory to manage")
     parser.add_argument("--username", default=settings.USERNAME, help="Admin username")
     parser.add_argument("--password", default=None, help="Admin password (leave blank to auto-generate)")
-    parser.add_argument("-l", "--lang", "--language", dest="lang", default=settings.DEFAULT_LANG, choices=["vi", "en", "zh"], help="Default interface language: vi (Tiếng Việt), en (English), zh (简体中文) (default: vi)")
+    parser.add_argument("-l", "--lang", "--language", dest="lang", default=settings.DEFAULT_LANG, choices=["vi", "en", "zh"], help="Default interface language: vi (Tiếng Việt), en (English), zh (简体中文) (default: en)")
     parser.add_argument("--no-tunnel", action="store_true", help="Disable Cloudflare Tunnel (local development)")
     parser.add_argument("--token", default=None, help="Cloudflare Tunnel Token (if using named tunnel)")
 
@@ -429,6 +429,8 @@ def main():
                 time.sleep(1)
     except KeyboardInterrupt:
         handle_shutdown(None, None)
+    finally:
+        server_thread.join(timeout=10)
 
 
 if __name__ == "__main__":

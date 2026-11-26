@@ -202,6 +202,7 @@ class CloudflareTunnelService:
             if configured:
                 parsed = urlsplit(configured)
                 if parsed.scheme.lower() != "https" or not parsed.hostname:
+                    self.stop_tunnel()
                     raise RuntimeError("CLOUDFLARE_TUNNEL_URL must be a valid HTTPS URL.")
                 self.public_url = configured.rstrip("/")
             return self.public_url

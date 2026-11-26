@@ -118,6 +118,7 @@ const I18n = {
       selected_items: "Đã chọn {count} mục",
       download_selected_zip: "Tải nén (.ZIP)",
       delete_selected: "Xóa",
+      deselect: "Bỏ chọn",
 
       // File List / Grid
       col_name: "Tên",
@@ -480,6 +481,7 @@ const I18n = {
       selected_items: "Selected {count} item(s)",
       download_selected_zip: "Download (.ZIP)",
       delete_selected: "Delete",
+      deselect: "Deselect",
 
       // File List / Grid
       col_name: "Name",
@@ -842,6 +844,7 @@ const I18n = {
       selected_items: "已选择 {count} 项",
       download_selected_zip: "打包下载 (.ZIP)",
       delete_selected: "删除",
+      deselect: "取消选择",
 
       // File List / Grid
       col_name: "名称",

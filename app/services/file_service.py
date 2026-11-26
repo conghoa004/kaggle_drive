@@ -251,6 +251,32 @@ def _remove_owned_empty_directory(path: Path, identity) -> None:
         pass
 
 
+def _publish_without_overwrite(source: Path, destination: Path) -> None:
+    """Move a staged regular file into destination without overwriting."""
+    if os.name == "nt":
+        source.rename(destination)
+        return
+    try:
+        os.link(source, destination, follow_symlinks=False)
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        if exc.errno not in {
+            errno.EXDEV,
+            errno.EPERM,
+            errno.EACCES,
+            getattr(errno, "EOPNOTSUPP", errno.EPERM),
+            getattr(errno, "ENOTSUP", errno.EPERM),
+            errno.EINVAL,
+        }:
+            raise
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(destination))
+        source.replace(destination)
+        return
+    source.unlink()
+
+
 def _rename_without_overwrite(source: Path, destination: Path) -> None:
     """Rename an entry without replacing a path created concurrently."""
     if source.is_symlink() and os.name != "nt":
@@ -276,13 +302,7 @@ def _rename_without_overwrite(source: Path, destination: Path) -> None:
             raise
         return
 
-    if os.name == "nt":
-        # Windows os.rename fails atomically if the destination exists.
-        source.rename(destination)
-    else:
-        # Same-filesystem hard links claim a new name atomically on POSIX.
-        os.link(source, destination, follow_symlinks=False)
-        source.unlink()
+    _publish_without_overwrite(source, destination)
 
 
 def _is_regular_archive_file(path: Path) -> bool:
@@ -836,11 +856,10 @@ class FileService:
                 os.replace(temp_path, dest_path)
             else:
                 try:
-                    os.link(temp_path, dest_path)
+                    _publish_without_overwrite(temp_path, dest_path)
                 except FileExistsError:
                     relative_path = _path_to_api(dest_path.relative_to(get_root_dir().resolve()))
                     raise _overwrite_required([relative_path])
-                temp_path.unlink()
             temp_path = None
         except HTTPException:
             if temp_path:
@@ -1153,6 +1172,7 @@ class FileService:
                     if exc.errno not in {
                         errno.EXDEV,
                         errno.EPERM,
+                        errno.EACCES,
                         getattr(errno, "EOPNOTSUPP", errno.EPERM),
                         getattr(errno, "ENOTSUP", errno.EPERM),
                     }:
@@ -1325,7 +1345,14 @@ class FileService:
         while cursor != root_dir and not cursor.exists():
             destination_directories_created.append(cursor)
             cursor = cursor.parent
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        if dest_dir.is_symlink() or (dest_dir.exists() and not dest_dir.is_dir()):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "path_conflict",
+                    "message": "Extraction destination conflicts with an existing file.",
+                },
+            )
         dest_root = validate_destination_root(dest_dir)
 
         def safe_member_path(member_name: str) -> Path:
@@ -1527,7 +1554,13 @@ class FileService:
                         status_code=413,
                         detail="Archive metadata exceeds the configured limit.",
                     )
-                directory_start = end_record[zipfile._ECD_LOCATION] - directory_size
+                offset_cd = end_record[zipfile._ECD_OFFSET]
+                concat = end_record[zipfile._ECD_LOCATION] - directory_size - offset_cd
+                if end_record[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+                    concat -= (
+                        zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+                    )
+                directory_start = offset_cd + concat
                 archive_stream.seek(0, os.SEEK_END)
                 archive_size = archive_stream.tell()
                 if (
@@ -1709,11 +1742,10 @@ class FileService:
                         raise
                 else:
                     try:
-                        os.link(temp_path, target)
+                        _publish_without_overwrite(temp_path, target)
                     except FileExistsError:
                         raise _overwrite_required([target.relative_to(dest_root).as_posix()])
                     published_files.append(target)
-                    temp_path.unlink()
                 temp_path = None
             except Exception:
                 if temp_path:
@@ -1723,6 +1755,16 @@ class FileService:
         extracted_count = 0
         skipped_count = 0
         try:
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+            except (FileExistsError, NotADirectoryError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "path_conflict",
+                        "message": "Extraction destination conflicts with an existing file.",
+                    },
+                ) from exc
             if zipfile.is_zipfile(archive_path):
                 check_zip_member_count_before_loading()
                 with zipfile.ZipFile(archive_path, "r") as zip_file:
@@ -1930,6 +1972,11 @@ class FileService:
                     status_code=400,
                     detail="Invalid or corrupted RAR archive.",
                 ) from exc
+            if isinstance(exc, (zipfile.BadZipFile, tarfile.TarError)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid or corrupted archive: {exc}",
+                ) from exc
             raise HTTPException(status_code=500, detail=f"Could not extract archive: {exc}")
 
         if transaction_dir is not None:
@@ -2003,10 +2050,11 @@ class FileService:
             return parsed, addresses
 
         parsed, _ = validate_url(url)
-        filename = custom_filename.strip() if custom_filename and custom_filename.strip() else (
+        has_custom_filename = bool(custom_filename and custom_filename.strip())
+        filename = custom_filename.strip() if has_custom_filename else (
             os.path.basename(unquote(parsed.path))
         )
-        if not filename or "." not in filename:
+        if not filename or (not has_custom_filename and "." not in filename):
             filename = f"download_{int(time.time())}.bin"
         if os.name == "nt":
             filename = filename.replace("\\", "/")
@@ -2120,10 +2168,9 @@ class FileService:
                 os.replace(temp_path, dest_entry)
             else:
                 try:
-                    os.link(temp_path, dest_entry)
+                    _publish_without_overwrite(temp_path, dest_entry)
                 except FileExistsError:
                     raise _overwrite_required([filename])
-                temp_path.unlink()
             temp_path = None
         except HTTPException:
             if temp_path:
@@ -2351,15 +2398,12 @@ class FileService:
                 raise HTTPException(status_code=400, detail="No files were available to archive.")
             check_cancelled(cancel_event)
             try:
-                # The temporary ZIP is in the destination directory, so a hard
-                # link publishes it atomically and fails if another request won.
-                os.link(temp_path, dest)
+                _publish_without_overwrite(temp_path, dest)
             except FileExistsError as exc:
                 raise HTTPException(
                     status_code=409,
                     detail="An archive with that name already exists.",
                 ) from exc
-            temp_path.unlink()
             temp_path = None
         except Exception as exc:
             if temp_path:

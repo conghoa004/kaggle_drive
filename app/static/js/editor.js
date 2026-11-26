@@ -80,12 +80,13 @@ const Editor = {
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
           e.preventDefault();
           this.saveCurrentFile();
-        } else if (!e.ctrlKey && !e.metaKey && !["Shift", "Alt", "Control", "Meta", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
-          this.setDirty(true);
         }
       });
 
       textarea.addEventListener("input", () => {
+        if (this.currentFilePath) {
+          this.setDirty(true);
+        }
         this.updateStatusInfo();
       });
 

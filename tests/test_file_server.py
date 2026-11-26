@@ -384,6 +384,88 @@ class TestKaggleCloudDrive(unittest.TestCase):
         self.assertEqual(res_col["archive_name"], "file1_1.zip")
         self.assertTrue(get_safe_path("compress_test_dir/file1_1.zip").exists())
 
+    def test_14_bug_fixes_regression(self):
+        """Verify ZIP64 bounds, corrupt archive 400, dest conflict 409, and credential trimming."""
+        import struct
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from app.routes.view_routes import get_index
+
+        # 1. Credential verification handles whitespace in configured settings
+        prev_user, prev_pass = settings.USERNAME, settings.PASSWORD
+        try:
+            settings.USERNAME = "  testadmin  "
+            settings.PASSWORD = "  secret123  "
+            self.assertTrue(verify_credentials("testadmin", "secret123"))
+        finally:
+            settings.USERNAME, settings.PASSWORD = prev_user, prev_pass
+
+        # 2. HTML escaping in server-hydrated index response
+        req_xss = SimpleNamespace(session={"authenticated": True, "username": 'a"b<c>'})
+        resp_xss = get_index(req_xss)
+        body_xss = resp_xss.body.decode("utf-8")
+        self.assertIn('content="a&quot;b&lt;c&gt;"', body_xss)
+        self.assertIn('>a&quot;b&lt;c&gt;</span>', body_xss)
+
+        # 3. Extract destination conflicting with existing file returns 409, not 500
+        conflict_zip = settings.ROOT_DIR / "conflict_arc.zip"
+        with zipfile.ZipFile(conflict_zip, "w") as zf:
+            zf.writestr("inside.txt", "hello")
+        (settings.ROOT_DIR / "conflict_arc").write_text("existing file", encoding="utf-8")
+        with self.assertRaises(HTTPException) as ctx:
+            FileService.extract_archive("conflict_arc.zip")
+        self.assertEqual(ctx.exception.status_code, 409)
+
+        # 4. Corrupted ZIP returns 400, not 500
+        bad_zip = settings.ROOT_DIR / "corrupt.zip"
+        bad_zip.write_bytes(b"PK\x03\x04corrupted_data")
+        with self.assertRaises(HTTPException) as ctx_bad:
+            FileService.extract_archive("corrupt.zip")
+        self.assertEqual(ctx_bad.exception.status_code, 400)
+
+        # 5. Valid ZIP64 archive (with ZIP64 EOCD + Locator) extracts cleanly
+        zip64_path = settings.ROOT_DIR / "valid_zip64.zip"
+        with zipfile.ZipFile(zip64_path, "w") as zf:
+            zf.writestr("hello64.txt", "zip64 ok")
+        raw = zip64_path.read_bytes()
+        eocd_pos = raw.rfind(zipfile.stringEndArchive)
+        eocd = list(struct.unpack(zipfile.structEndArchive, raw[eocd_pos:eocd_pos + zipfile.sizeEndCentDir]))
+        cd_offset = eocd[6]
+        cd_size = eocd[5]
+        entries = eocd[3]
+        zip64_eocd = struct.pack(
+            zipfile.structEndArchive64,
+            zipfile.stringEndArchive64, 44, 45, 45, 0, 0, entries, entries, cd_size, cd_offset,
+        )
+        zip64_loc_offset = eocd_pos + len(zip64_eocd)
+        zip64_loc = struct.pack(
+            zipfile.structEndArchive64Locator,
+            zipfile.stringEndArchive64Locator, 0, eocd_pos, 1,
+        )
+        eocd[3] = 0xFFFF
+        eocd[4] = 0xFFFF
+        eocd[5] = 0xFFFFFFFF
+        eocd[6] = 0xFFFFFFFF
+        new_eocd = struct.pack(zipfile.structEndArchive, *eocd)
+        zip64_path.write_bytes(raw[:eocd_pos] + zip64_eocd + zip64_loc + new_eocd)
+
+        res_z64 = FileService.extract_archive("valid_zip64.zip")
+        self.assertEqual(res_z64["status"], "success")
+        self.assertEqual((settings.ROOT_DIR / "valid_zip64" / "hello64.txt").read_text(encoding="utf-8"), "zip64 ok")
+
+        # 6. PortManager includes IPv6 dual-stack '::' listeners
+        from app.services.port_service import PortManager
+        fake_conn = SimpleNamespace(
+            type=1,  # socket.SOCK_STREAM
+            status="LISTEN",
+            laddr=SimpleNamespace(ip="::", port=5173),
+            pid=None,
+        )
+        with patch("app.services.port_service.psutil.net_connections", return_value=[fake_conn]), \
+             patch("app.services.port_service.psutil.CONN_LISTEN", "LISTEN"):
+            ports = PortManager._listening_ports()
+        self.assertTrue(any(p["port"] == 5173 for p in ports))
+
 
 if __name__ == "__main__":
     unittest.main()

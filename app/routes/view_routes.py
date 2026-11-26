@@ -1,3 +1,4 @@
+import html
 from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,13 +17,16 @@ def get_index(request: Request):
         content = INDEX_FILE.read_text(encoding="utf-8")
         is_auth = request.session.get("authenticated") is True
         username = request.session.get("username", settings.USERNAME) if is_auth else ""
+        safe_username_attr = html.escape(username, quote=True)
+        safe_username_text = html.escape(username)
+        safe_lang = html.escape(settings.DEFAULT_LANG, quote=True)
         auth_val = "1" if is_auth else "0"
 
         # Inject server-auth metadata to avoid auth latency
         auth_meta = (
-            f'<meta name="server-lang" content="{settings.DEFAULT_LANG}">\n'
+            f'<meta name="server-lang" content="{safe_lang}">\n'
             f'  <meta name="server-auth" content="{auth_val}">\n'
-            f'  <meta name="server-user" content="{username}">'
+            f'  <meta name="server-user" content="{safe_username_attr}">'
         )
         content = content.replace('<meta name="server-lang" content="vi">', auth_meta)
 
@@ -36,7 +40,7 @@ def get_index(request: Request):
                 '<div id="appContainer" class="hidden h-screen',
                 '<div id="appContainer" style="display: flex;" class="flex h-screen'
             )
-            content = content.replace('>admin</span>', f'>{username}</span>')
+            content = content.replace('>admin</span>', f'>{safe_username_text}</span>')
 
         return HTMLResponse(content=content, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Index template not found."})
