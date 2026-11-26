@@ -52,7 +52,7 @@ EXTENSION_CATEGORIES = {
     "safetensors": "data", "onnx": "data",
     # Archives
     "zip": "archive", "tar": "archive", "gz": "archive", "tgz": "archive",
-    "bz2": "archive", "7z": "archive", "rar": "archive"
+    "bz2": "archive", "rar": "archive"
 }
 
 MEDIA_MIMETYPES = {

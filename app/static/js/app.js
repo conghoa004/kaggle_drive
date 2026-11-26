@@ -1112,7 +1112,7 @@ const App = {
       } else {
         const isSpreadsheet = ['spreadsheet', 'csv'].includes(item.category) || ['xlsx', 'xls', 'csv', 'tsv'].includes((item.extension || '').toLowerCase());
         const isEditable = (['code', 'text', 'markdown'].includes(item.category) || ['csv', 'tsv'].includes((item.extension || '').toLowerCase())) && !['xlsx', 'xls'].includes((item.extension || '').toLowerCase());
-        const isArchive = ['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', '7z', 'rar'].includes((item.extension || '').toLowerCase());
+        const isArchive = ['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', 'rar'].includes((item.extension || '').toLowerCase());
         const isShellScript = (item.extension || '').toLowerCase() === 'sh';
 
         let primaryIcon = 'fa-regular fa-eye';
@@ -1971,7 +1971,7 @@ const App = {
               <i class="fa-solid fa-pen-to-square"></i> ${t("action_edit")}
             </button>
           ` : ''}
-          ${['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', '7z', 'rar'].includes((item.extension || '').toLowerCase()) ? `
+          ${['zip', 'tar', 'archive'].includes(item.category) || ['zip', 'tar', 'gz', 'bz2', 'rar'].includes((item.extension || '').toLowerCase()) ? `
             <button class="btn-secondary" style="text-align: left;" onclick="UI.closeModal('itemActionsModal'); App.extractArchive('${safePath}')">
               <i class="fa-solid fa-box-open"></i> ${t("action_extract_here")}
             </button>
