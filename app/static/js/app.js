@@ -2835,7 +2835,7 @@ const App = {
   },
 
   getTerminalPromptBoundary(buffer, cursorRow) {
-    const promptPattern = /^(?:\([^)]+\)\s*)?[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[^$#\r\n]*[$#]\s/;
+    const promptPattern = /^(?:(?:\([^)]+\)\s+)*)[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[^$#\r\n]*[$#]\s/;
     const minSearchRow = Math.max(0, cursorRow - 200);
     for (let row = cursorRow; row >= minSearchRow; row -= 1) {
       const line = buffer.getLine(row);
@@ -2848,6 +2848,95 @@ const App = {
       }
     }
     return null;
+  },
+
+  extractTerminalCandidateText(buffer, candidate) {
+    const { startRow, startCol, endRow, endCol } = candidate;
+    if (
+      startRow < 0 ||
+      endRow < startRow ||
+      endRow >= buffer.length ||
+      startCol < 0 ||
+      endCol < 0
+    ) {
+      return null;
+    }
+    const parts = [];
+    for (let row = startRow; row <= endRow; row += 1) {
+      const line = buffer.getLine(row);
+      if (!line) return null;
+      const from = row === startRow ? startCol : 0;
+      const to = row === endRow ? endCol : line.length;
+      if (to < from) return null;
+      const nextLine = row + 1 <= endRow ? buffer.getLine(row + 1) : null;
+      const trimRight = !(nextLine && nextLine.isWrapped);
+      const text = line.translateToString(trimRight, from, to);
+      if (line.isWrapped && parts.length > 0) {
+        parts[parts.length - 1] += text;
+      } else {
+        parts.push(text);
+      }
+    }
+    return parts.join("\n").replace(/\r\n/g, "\n").trimEnd();
+  },
+
+  resolveTerminalSelectionBounds(tab, buffer, pos) {
+    const normalizeEnd = (candidate) => {
+      let { startRow, startCol, endRow, endCol } = candidate;
+      if (endCol === 0 && endRow > startRow) {
+        endRow -= 1;
+        const prevLine = buffer.getLine(endRow);
+        endCol = prevLine ? prevLine.length : 0;
+      }
+      if (startRow > endRow || (startRow === endRow && startCol > endCol)) {
+        return { startRow: endRow, startCol: endCol, endRow: startRow, endCol: startCol };
+      }
+      return { startRow, startCol, endRow, endCol };
+    };
+
+    const candidates = [
+      // Standard xterm.js >= 4.19 / 5.x / 6.x: 1-based x/y, end.x inclusive (== 0-based exclusive)
+      normalizeEnd({
+        startRow: pos.start.y - 1,
+        startCol: pos.start.x - 1,
+        endRow: pos.end.y - 1,
+        endCol: pos.end.x,
+      }),
+      // Fallback if end.x is 1-based exclusive
+      normalizeEnd({
+        startRow: pos.start.y - 1,
+        startCol: pos.start.x - 1,
+        endRow: pos.end.y - 1,
+        endCol: pos.end.x - 1,
+      }),
+      // Fallback if coordinates are 0-based
+      normalizeEnd({
+        startRow: pos.start.y,
+        startCol: pos.start.x,
+        endRow: pos.end.y,
+        endCol: pos.end.x,
+      }),
+    ];
+
+    const selected = (tab.instance.getSelection() || "").replace(/\r\n/g, "\n").trimEnd();
+    if (selected) {
+      for (const candidate of candidates) {
+        const extracted = this.extractTerminalCandidateText(buffer, candidate);
+        if (extracted !== null && extracted === selected) {
+          return candidate;
+        }
+      }
+    }
+
+    if (
+      pos.start.y >= 1 &&
+      pos.start.x >= 1 &&
+      candidates[0].startRow >= 0 &&
+      candidates[0].endRow < buffer.length
+    ) {
+      return candidates[0];
+    }
+    return candidates[2];
   },
 
   getTerminalRowTextEndCol(line, minCol = 0, floorCol = 0, buffer = null) {
@@ -2889,11 +2978,9 @@ const App = {
     const pos = tab.instance.getSelectionPosition();
     if (!pos || !pos.start || !pos.end) return false;
 
-    let start = pos.start;
-    let end = pos.end;
-    if (start.y > end.y || (start.y === end.y && start.x > end.x)) {
-      [start, end] = [end, start];
-    }
+    const bounds = this.resolveTerminalSelectionBounds(tab, buffer, pos);
+    const start = { x: bounds.startCol, y: bounds.startRow };
+    const end = { x: bounds.endCol, y: bounds.endRow };
 
     const cursorRow = buffer.baseY + buffer.cursorY;
     const wrappedRange = this.getTerminalLogicalLineRange(buffer, cursorRow);
@@ -2997,6 +3084,28 @@ const App = {
       const isModifier = (event.ctrlKey || event.metaKey) && !event.altKey;
       const key = (event.key || "").toLowerCase();
 
+      if (!event.altKey && tab.instance.hasSelection()) {
+        if (event.key === "Backspace" || event.key === "Delete") {
+          if (this.deleteTerminalSelection(tab)) {
+            event.preventDefault();
+            return false;
+          }
+          return true;
+        }
+
+        if (
+          !isModifier &&
+          !event.isComposing &&
+          event.key !== "Process" &&
+          event.keyCode !== 229 &&
+          event.key &&
+          event.key.length === 1
+        ) {
+          this.deleteTerminalSelection(tab);
+          return true;
+        }
+      }
+
       if (isModifier) {
         if (key === "c") {
           if (tab.instance.hasSelection()) {
@@ -3036,27 +3145,6 @@ const App = {
         }
 
         return true;
-      }
-
-      if (!event.altKey && tab.instance.hasSelection()) {
-        if (event.key === "Backspace" || event.key === "Delete") {
-          if (this.deleteTerminalSelection(tab)) {
-            event.preventDefault();
-            return false;
-          }
-          return true;
-        }
-
-        if (
-          !event.isComposing &&
-          event.key !== "Process" &&
-          event.keyCode !== 229 &&
-          event.key &&
-          event.key.length === 1
-        ) {
-          this.deleteTerminalSelection(tab);
-          return true;
-        }
       }
 
       return true;
