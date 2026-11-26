@@ -11,7 +11,6 @@ const AppState = {
   selectedItems: new Set(),
   fileClipboard: null,
   lastSelectedPath: null,
-  terminalCwd: "",
   viewMode: localStorage.getItem("kaggle_drive_view_mode") || "grid", // 'grid' | 'list'
   showHidden: false,
   searchQuery: "",
@@ -2480,12 +2479,6 @@ const App = {
   terminalTabs: [],
   activeTerminalTabId: null,
   terminalStorageKey: "kaggle_drive_terminal_tabs_v1",
-  terminalInstance: null,
-  terminalFitAddon: null,
-  terminalSocket: null,
-  terminalResizeObserver: null,
-  terminalPendingInput: [],
-  terminalRequestedCwd: null,
 
   newTerminalSessionId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -2582,7 +2575,6 @@ const App = {
     }
     this.persistTerminalTabs();
     restored.forEach(tab => this.connectTerminal(tab));
-    return restored.length;
   },
 
   getActiveTerminalTab() {
@@ -2743,13 +2735,6 @@ const App = {
       if (item.container) item.container.hidden = item.id !== tab.id;
     });
 
-    this.terminalInstance = tab.instance;
-    this.terminalFitAddon = tab.fitAddon;
-    this.terminalSocket = tab.socket;
-    this.terminalResizeObserver = tab.resizeObserver;
-    this.terminalPendingInput = tab.pendingInput;
-    this.terminalRequestedCwd = tab.cwd;
-    AppState.terminalCwd = tab.cwd;
     this.persistTerminalTabs();
 
     const header = document.getElementById("terminalHeaderTitle");
@@ -3275,7 +3260,6 @@ const App = {
     tab.serverSentTerminalError = false;
     tab.serverTerminalErrorMessage = "";
     tab.socket = socket;
-    if (this.activeTerminalTabId === tab.id) this.terminalSocket = socket;
     tab.status = "connecting";
     this.renderTerminalTabs();
 
@@ -3361,7 +3345,6 @@ const App = {
         tab.socket = null;
         if (tab.connectedOnce || tab.restoredFromStorage) tab.needsReplay = true;
         tab.status = tab.serverSentTerminalError && event.code !== 1013 ? "error" : "disconnected";
-        if (this.activeTerminalTabId === tab.id) this.terminalSocket = null;
         this.renderTerminalTabs();
       }
       if (!wasCurrentSocket || event.code === 1000 || !tab.instance) return;
@@ -3449,12 +3432,6 @@ const App = {
     if (this.activeTerminalTabId) {
       this.activateTerminalTab(this.activeTerminalTabId);
     } else {
-      this.terminalInstance = null;
-      this.terminalFitAddon = null;
-      this.terminalSocket = null;
-      this.terminalResizeObserver = null;
-      this.terminalPendingInput = [];
-      this.terminalRequestedCwd = null;
       const header = document.getElementById("terminalHeaderTitle");
       if (header) header.textContent = t("terminal_title");
       this.renderTerminalTabs();
@@ -3476,12 +3453,6 @@ const App = {
     tabs.forEach(tab => this.disposeTerminalTab(tab, false));
     this.terminalTabs = [];
     this.activeTerminalTabId = null;
-    this.terminalInstance = null;
-    this.terminalFitAddon = null;
-    this.terminalSocket = null;
-    this.terminalResizeObserver = null;
-    this.terminalPendingInput = [];
-    this.terminalRequestedCwd = null;
     const header = document.getElementById("terminalHeaderTitle");
     if (header) header.textContent = t("terminal_title");
     this.renderTerminalTabs();

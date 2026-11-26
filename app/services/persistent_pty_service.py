@@ -32,7 +32,6 @@ _TERMINAL_SESSIONS: Dict[str, "_TerminalSession"] = {}
 
 @dataclass
 class _TerminalConnection:
-    websocket: WebSocket
     output_queue: asyncio.Queue
 
 
@@ -426,7 +425,6 @@ class PtyTerminalService:
             session.idle_task = None
 
         connection = _TerminalConnection(
-            websocket=websocket,
             output_queue=asyncio.Queue(maxsize=TERMINAL_OUTPUT_QUEUE_CHUNKS),
         )
         connection_key = id(websocket)
@@ -508,8 +506,6 @@ class PtyTerminalService:
             {
                 "session_id": session.session_id,
                 "cwd": str(session.cwd),
-                "exited": session.exited,
-                "attached": bool(session.connections),
             }
             for session in sorted(
                 _TERMINAL_SESSIONS.values(),
