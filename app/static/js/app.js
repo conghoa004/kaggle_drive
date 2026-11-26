@@ -2777,10 +2777,98 @@ const App = {
     tab.fitAddon = new FitAddonCtor();
     tab.instance.loadAddon(tab.fitAddon);
     tab.instance.open(container);
+    this.setupTerminalClipboard(tab, container);
     tab.instance.onData(data => this.sendTerminalInput(data, tab));
     tab.resizeObserver = new ResizeObserver(() => this.fitTerminal(tab));
     tab.resizeObserver.observe(container);
     return true;
+  },
+
+  async copyTextToClipboard(text) {
+    if (!text) return false;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) {}
+    }
+    try {
+      const helper = document.createElement("textarea");
+      helper.value = text;
+      helper.setAttribute("readonly", "");
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      helper.style.pointerEvents = "none";
+      document.body.appendChild(helper);
+      helper.select();
+      const copied = document.execCommand("copy");
+      helper.remove();
+      return Boolean(copied);
+    } catch (_) {
+      return false;
+    }
+  },
+
+  pasteTextToTerminal(tab, text) {
+    if (!tab || !tab.instance || !text) return;
+    if (typeof tab.instance.paste === "function") {
+      tab.instance.paste(text);
+    } else {
+      this.sendTerminalInput(text, tab);
+    }
+  },
+
+  setupTerminalClipboard(tab, container) {
+    if (!tab || !tab.instance) return;
+    let nativePasteFired = false;
+    if (container) {
+      container.addEventListener("paste", () => {
+        nativePasteFired = true;
+      }, true);
+    }
+
+    tab.instance.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+      const isModifier = (event.ctrlKey || event.metaKey) && !event.altKey;
+      if (!isModifier) return true;
+
+      const key = (event.key || "").toLowerCase();
+      if (key === "c") {
+        if (tab.instance.hasSelection()) {
+          const selectedText = tab.instance.getSelection();
+          event.preventDefault();
+          tab.instance.clearSelection();
+          this.copyTextToClipboard(selectedText).then((ok) => {
+            if (!ok) UI.toast(t("terminal_copy_failed"), "warning");
+          });
+          return false;
+        }
+        if (event.shiftKey) {
+          event.preventDefault();
+          return false;
+        }
+        // No selection: pass Ctrl+C through as SIGINT (\x03).
+        return true;
+      }
+
+      if (key === "v") {
+        nativePasteFired = false;
+        // Let the browser's native paste event trigger xterm's paste handler
+        // without sending Ctrl+V (\x16) to the PTY; fall back to Clipboard API
+        // only when native paste did not fire (e.g. Ctrl+Shift+V in some browsers).
+        window.setTimeout(() => {
+          if (nativePasteFired) return;
+          if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+            navigator.clipboard.readText()
+              .then((text) => this.pasteTextToTerminal(tab, text))
+              .catch(() => {});
+          }
+        }, 20);
+        return false;
+      }
+
+      return true;
+    });
   },
 
   connectTerminal(tab = this.getActiveTerminalTab()) {
@@ -3068,10 +3156,12 @@ const App = {
     const text = tab.instance.getSelection();
     tab.instance.clearSelection();
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      UI.toast(t("terminal_copy_toast"), "success");
-    }).catch(() => {
-      UI.toast(t("terminal_copy_failed"), "warning");
+    this.copyTextToClipboard(text).then((ok) => {
+      if (ok) {
+        UI.toast(t("terminal_copy_toast"), "success");
+      } else {
+        UI.toast(t("terminal_copy_failed"), "warning");
+      }
     });
   },
 
