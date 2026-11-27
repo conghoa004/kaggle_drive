@@ -8,6 +8,7 @@ FILES=(
     "config.client.toml"
     "config.server.toml"
     "wsb"
+    "README.md"
 )
 
 echo "=========================================="
