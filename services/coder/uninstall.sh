@@ -1,96 +1,132 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-# ==========================================================
-# Configuration
-# ==========================================================
+: "${HOME:?HOME must be set}"
+[[ "$HOME" != "/" ]] || { printf 'Error: refusing to uninstall with HOME=/\n' >&2; exit 1; }
 
 STATE_DIR="${HOME}/.local/state/kaggle-code-server"
 LOCAL_BIN_DIR="${HOME}/.local/bin"
 LOCAL_LIB_DIR="${HOME}/.local/lib"
 LOCAL_SHARE_DIR="${HOME}/.local/share"
-
 CODE_SERVER_LINK="${LOCAL_BIN_DIR}/code-server"
 CLOUDFLARED_LOCAL_BIN="${LOCAL_BIN_DIR}/cloudflared"
 CODE_SERVER_DATA_DIR="${LOCAL_SHARE_DIR}/code-server"
-
+CODE_SERVER_MARKER="${STATE_DIR}/code-server-install-dir"
+CLOUDFLARED_MARKER="${STATE_DIR}/cloudflared-install-path"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STOP_SCRIPT="${SCRIPT_DIR}/stop.sh"
+AUTO_YES=false
 
-# ==========================================================
-# Helpers
-# ==========================================================
+info() { printf '%s\n' "$*"; }
+error() { printf 'Error: %s\n' "$*" >&2; }
 
-print_info() {
-    printf '%s\n' "$1"
-}
+usage() {
+    cat <<'EOF'
+Usage: bash uninstall.sh [--yes] [--help]
 
-print_error() {
-    printf 'Error: %s\n' "$1" >&2
+Asks before removing this user's standalone code-server, local cloudflared,
+state, credentials, and code-server user data. Workspace files and logs are kept.
+EOF
 }
 
 confirm_uninstall() {
-    if [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]]; then
-        return 0
+    [[ "$AUTO_YES" == true ]] && return 0
+    if [[ ! -t 0 ]]; then
+        error "Use --yes to confirm uninstall without a terminal."
+        return 2
     fi
+    cat <<'EOF'
+This will stop managed services and remove:
+  - Standalone code-server versions under ~/.local/lib/code-server-*.
+  - The user-local cloudflared binary at ~/.local/bin/cloudflared, if present.
+  - code-server state, credentials, and user data under ~/.local/share/code-server.
 
-    echo "This will:"
-    echo "  - Stop code-server and the managed Cloudflare Tunnel."
-    echo "  - Remove the standalone code-server installation under ~/.local."
-    echo "  - Remove the user-local cloudflared binary under ~/.local/bin."
-    echo "  - Remove code-server state, configuration, and its data directory."
-    echo "  - Remove the login.txt file recorded by start.sh."
-    echo ""
-    echo "Workspace files and workspace logs will be preserved."
-    echo "System-wide installations will not be removed."
-    echo ""
-
+Workspace files and workspace logs are preserved. System installations are not removed.
+EOF
     local answer
-    read -r -p "Continue? [y/N]: " answer
-    case "${answer}" in
-        y|Y|yes|YES) ;;
-        *)
-            print_info "Uninstall cancelled."
-            exit 0
-            ;;
+    read -r -p "Continue? [y/N]: " answer || true
+    case "$answer" in
+        y|Y|yes|YES) return 0 ;;
+        *) info "Uninstall cancelled."; return 1 ;;
     esac
 }
 
-stop_services() {
-    if [[ -x "${STOP_SCRIPT}" ]]; then
-        bash "${STOP_SCRIPT}"
-        return
+remove_code_server() {
+    local install_dir target recorded_dir
+    recorded_dir=""
+    if [[ -f "$CODE_SERVER_MARKER" ]]; then
+        recorded_dir="$(cat "$CODE_SERVER_MARKER" 2>/dev/null || true)"
+        if [[ -n "$recorded_dir" ]]; then
+            if [[ "$(dirname "$recorded_dir")" != "$LOCAL_LIB_DIR" || "${recorded_dir##*/}" != code-server-* ]]; then
+                error "Invalid code-server install marker; skipping the marked directory."
+                recorded_dir=""
+            fi
+        fi
     fi
 
-    print_info "stop.sh not found; stopping processes using saved PID files."
+    if [[ -L "$CODE_SERVER_LINK" ]]; then
+        target="$(readlink -f "$CODE_SERVER_LINK" 2>/dev/null || true)"
+        case "$target" in
+            "$LOCAL_LIB_DIR"/code-server-*/bin/code-server)
+                rm -f -- "$CODE_SERVER_LINK"
+                ;;
+        esac
+    fi
 
-    local pid_file pid
-    for pid_file in \
-        "${STATE_DIR}/cloudflared.pid" \
-        "${STATE_DIR}/code-server.pid"; do
+    if [[ -n "$recorded_dir" && -d "$recorded_dir" ]]; then
+        rm -rf -- "$recorded_dir"
+        info "Removed standalone code-server at $recorded_dir"
+    fi
 
-        [[ -f "${pid_file}" ]] || continue
-        pid="$(cat "${pid_file}" 2>/dev/null || true)"
-
-        if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
-            kill -TERM "${pid}" 2>/dev/null || true
-            for _ in $(seq 1 10); do
-                kill -0 "${pid}" 2>/dev/null || break
-                sleep 1
-            done
-            kill -KILL "${pid}" 2>/dev/null || true
-        fi
-        rm -f "${pid_file}"
+    # Also clean versions installed by the previous scripts, which had no marker.
+    for install_dir in "$LOCAL_LIB_DIR"/code-server-*; do
+        [[ -d "$install_dir" ]] || continue
+        [[ "$install_dir" == "$recorded_dir" ]] && continue
+        rm -rf -- "$install_dir"
+        info "Removed standalone code-server at $install_dir"
     done
 }
 
-remove_standalone_code_server() {
-    print_info "Removing standalone code-server installation..."
+remove_cloudflared() {
+    local recorded_path
+    [[ -f "$CLOUDFLARED_LOCAL_BIN" ]] || return 0
+    if [[ -f "$CLOUDFLARED_MARKER" ]]; then
+        recorded_path="$(cat "$CLOUDFLARED_MARKER" 2>/dev/null || true)"
+        [[ "$recorded_path" == "$CLOUDFLARED_LOCAL_BIN" ]] || {
+            info "Leaving cloudflared because it is not recorded as this script's install."
+            return 0
+        }
+    fi
+    rm -f -- "$CLOUDFLARED_LOCAL_BIN"
+    info "Removed user-local cloudflared."
+}
 
-    # Only remove the user-local symlink if it points into ~/.local/lib/code-server-*.
-    if [[ -L "${CODE_SERVER_LINK}" ]]; then
-        local target
-        target="$(readlink -f "${CODE_SERVER_LINK}" 2>/dev/null || true)"
-        case "${target}" in
-            "${LOCAL_LIB_DIR}"/code-server-*)
-                rm -f "${CODE_SERVER_LINK}"
+main() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y) AUTO_YES=true; shift ;;
+            --help|-h) usage; return 0 ;;
+            *) error "Unknown option: $1"; usage >&2; return 2 ;;
+        esac
+    done
+
+    if confirm_uninstall; then
+        :
+    else
+        local status=$?
+        [[ "$status" == 1 ]] && return 0
+        return "$status"
+    fi
+
+    bash "${SCRIPT_DIR}/stop.sh"
+    remove_code_server
+    remove_cloudflared
+    if [[ -d "$CODE_SERVER_DATA_DIR" ]]; then
+        rm -rf -- "$CODE_SERVER_DATA_DIR"
+        info "Removed code-server user data."
+    fi
+    if [[ -d "$STATE_DIR" ]]; then
+        rm -rf -- "$STATE_DIR"
+        info "Removed code-server state and credentials."
+    fi
+    info "Uninstall complete. Workspace files and workspace logs were preserved."
+}
+main "$@"

@@ -1,78 +1,51 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-# ==========================================================
-# Configuration
-# ==========================================================
+: "${HOME:?HOME must be set}"
 
 STATE_DIR="${HOME}/.local/state/kaggle-code-server"
 CODE_SERVER_PID_FILE="${STATE_DIR}/code-server.pid"
 CLOUDFLARED_PID_FILE="${STATE_DIR}/cloudflared.pid"
 
-# ==========================================================
-# Helpers
-# ==========================================================
-
-print_info() {
-    printf '%s\n' "$1"
-}
+info() { printf '%s\n' "$*"; }
 
 stop_process() {
-    local service_name="$1"
-    local pid_file="$2"
-
-    if [[ ! -f "${pid_file}" ]]; then
-        print_info "${service_name}: no PID file; nothing to stop."
+    local name="$1" pid_file="$2" pid command_line
+    if [[ ! -f "$pid_file" ]]; then info "$name: no PID file."; return 0; fi
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ ! "$pid" =~ ^[0-9]+$ ]] || (( pid <= 1 )); then
+        info "$name: removing invalid PID file."
+        rm -f -- "$pid_file"
+        return 0
+    fi
+    command_line="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    if [[ -z "$command_line" ]]; then
+        info "$name: already stopped; removing stale PID file."
+        rm -f -- "$pid_file"
+        return 0
+    fi
+    if [[ "$command_line" != *"$name"* ]]; then
+        info "$name: PID $pid belongs to another process; leaving it untouched."
+        rm -f -- "$pid_file"
         return 0
     fi
 
-    local pid
-    pid="$(cat "${pid_file}" 2>/dev/null || true)"
-
-    if ! [[ "${pid}" =~ ^[0-9]+$ ]]; then
-        print_info "${service_name}: invalid PID file; removing stale file."
-        rm -f "${pid_file}"
-        return 0
-    fi
-
-    if ! kill -0 "${pid}" 2>/dev/null; then
-        print_info "${service_name}: process is not running; removing stale PID file."
-        rm -f "${pid_file}"
-        return 0
-    fi
-
-    print_info "Stopping ${service_name} (PID ${pid})..."
-    kill -TERM "${pid}" 2>/dev/null || true
-
-    local stopped=false
-    for _ in $(seq 1 15); do
-        if ! kill -0 "${pid}" 2>/dev/null; then
-            stopped=true
-            break
-        fi
+    info "Stopping $name (PID $pid)..."
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in {1..15}; do
+        kill -0 "$pid" 2>/dev/null || break
         sleep 1
     done
-
-    if [[ "${stopped}" == false ]] && kill -0 "${pid}" 2>/dev/null; then
-        print_info "${service_name} did not exit after SIGTERM; sending SIGKILL."
-        kill -KILL "${pid}" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+        info "$name did not exit after SIGTERM; sending SIGKILL."
+        kill -KILL "$pid" 2>/dev/null || true
     fi
-
-    rm -f "${pid_file}"
-    print_info "${service_name}: stopped."
+    rm -f -- "$pid_file"
+    info "$name: stopped."
 }
-
-# ==========================================================
-# Main
-# ==========================================================
 
 main() {
-    stop_process "Cloudflare Tunnel" "${CLOUDFLARED_PID_FILE}"
-    stop_process "code-server" "${CODE_SERVER_PID_FILE}"
-
-    echo ""
-    echo "Managed services have been stopped."
-    echo "Configuration, credentials, logs, and workspace files were preserved."
+    stop_process cloudflared "$CLOUDFLARED_PID_FILE"
+    stop_process code-server "$CODE_SERVER_PID_FILE"
+    info "Managed services are stopped; configuration, credentials, and workspace logs were kept."
 }
-
 main "$@"
