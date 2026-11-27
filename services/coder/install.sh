@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
 
 # ==========================================================
@@ -6,405 +7,223 @@ set -Eeuo pipefail
 # ==========================================================
 
 PORT="${CODE_SERVER_PORT:-8001}"
-
 WORKSPACE="${WORKSPACE_DIR:-${KAGGLE_WORKING_DIR:-/workspaces}}"
 
-LOCAL_BIN="${HOME}/.local/bin"
-
-STATE_DIR="${CODE_SERVER_STATE_DIR:-${HOME}/.local/state/kaggle-code-server}"
-
+STATE_DIR="${HOME}/.local/state/kaggle-code-server"
 CONFIG_FILE="${STATE_DIR}/config.yaml"
-SERVER_PID_FILE="${STATE_DIR}/code-server.pid"
-TUNNEL_PID_FILE="${STATE_DIR}/cloudflared.pid"
 
 LOG_DIR="${WORKSPACE}/log"
-SERVER_LOG="${LOG_DIR}/code-server.log"
-TUNNEL_LOG="${LOG_DIR}/cloudflared.log"
+CODE_SERVER_LOG="${LOG_DIR}/code-server.log"
+CLOUDFLARED_LOG="${LOG_DIR}/cloudflared.log"
 
-CLOUDFLARED_AMD64_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
-CLOUDFLARED_ARM64_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
+CODE_SERVER_PID_FILE="${STATE_DIR}/code-server.pid"
+CLOUDFLARED_PID_FILE="${STATE_DIR}/cloudflared.pid"
 
-HEALTH_URL="http://127.0.0.1:${PORT}/healthz"
+CREDENTIAL_FILE="${PWD}/login.txt"
 
-FOREGROUND=false
+CODE_SERVER_BIN=""
+CLOUDFLARED_BIN="${HOME}/.local/bin/cloudflared"
+
 TUNNEL_ENABLED=false
-TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
-INSTALL_EXTENSIONS="${INSTALL_EXTENSIONS:-false}"
+TUNNEL_TOKEN=""
+FOREGROUND=false
+INSTALL_EXTENSIONS=false
 
-
-# ==========================================================
-# Prepare directories
-# ==========================================================
-
-mkdir -p \
-    "${LOCAL_BIN}" \
-    "${STATE_DIR}" \
-    "${WORKSPACE}" \
-    "${LOG_DIR}"
-
-export PATH="${LOCAL_BIN}:${PATH}"
-
+TUNNEL_URL="Not enabled"
 
 # ==========================================================
-# Print usage
+# Helper functions
 # ==========================================================
 
-usage() {
+print_error() {
+    echo "Error: $1" >&2
+}
+
+print_info() {
+    echo "$1"
+}
+
+show_help() {
     cat <<EOF
-
 Usage:
-  $0 [OPTIONS]
+  ./start.sh [options]
 
 Options:
-  --tunnel
-      Start Cloudflare Quick Tunnel.
-
-  --tunnel-token TOKEN
-      Start Cloudflare Named Tunnel using TOKEN.
-
-  --port PORT
-      Set code-server port.
-      Default: ${PORT}
-
-  --workspace PATH
-      Set workspace directory.
-      Default: ${WORKSPACE}
-
-  --foreground
-      Keep this script running and supervise services.
-      Press Ctrl+C to stop services started by this script.
-
-  --install-extensions
-      Run services/coder/install_extension.sh during startup.
-
-  --help
-      Show this help message.
-
-Default:
-  Start code-server only.
-  Cloudflare Tunnel is NOT started unless --tunnel
-  or --tunnel-token is specified.
+  --tunnel                  Start Cloudflare Quick Tunnel
+  --tunnel-token TOKEN      Start Cloudflare Named Tunnel
+  --port PORT               Set code-server port
+  --workspace PATH          Set workspace directory
+  --foreground              Run services in foreground
+  --install-extensions      Install recommended extensions
+  --help                    Show this help
 
 Examples:
-  $0
-
-  $0 --tunnel
-
-  $0 --port 8082
-
-  $0 --workspace /workspaces
-
-  $0 --tunnel --port 8082 --foreground
-
-  $0 --tunnel-token YOUR_TUNNEL_TOKEN
-
+  ./start.sh
+  ./start.sh --tunnel
+  ./start.sh --tunnel-token YOUR_TOKEN
+  ./start.sh --port 8080
+  ./start.sh --tunnel --port 8080
+  ./start.sh --foreground
 EOF
 }
 
-
-# ==========================================================
-# Cleanup
-# ==========================================================
-
-SERVER_PID=""
-TUNNEL_PID=""
-
 cleanup() {
-    local exit_code=$?
+    if [[ -f "${CLOUDFLARED_PID_FILE}" ]]; then
+        local pid
+        pid="$(cat "${CLOUDFLARED_PID_FILE}" 2>/dev/null || true)"
 
-    if [[ -n "${TUNNEL_PID}" ]] &&
-       kill -0 "${TUNNEL_PID}" 2>/dev/null; then
-        echo "Stopping Cloudflare Tunnel..."
-        kill "${TUNNEL_PID}" 2>/dev/null || true
-        wait "${TUNNEL_PID}" 2>/dev/null || true
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            kill "${pid}" 2>/dev/null || true
+        fi
+
+        rm -f "${CLOUDFLARED_PID_FILE}"
     fi
 
-    if [[ -n "${SERVER_PID}" ]] &&
-       kill -0 "${SERVER_PID}" 2>/dev/null; then
-        echo "Stopping code-server..."
-        kill "${SERVER_PID}" 2>/dev/null || true
-        wait "${SERVER_PID}" 2>/dev/null || true
+    if [[ -f "${CODE_SERVER_PID_FILE}" ]]; then
+        local pid
+        pid="$(cat "${CODE_SERVER_PID_FILE}" 2>/dev/null || true)"
+
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            kill "${pid}" 2>/dev/null || true
+        fi
+
+        rm -f "${CODE_SERVER_PID_FILE}"
     fi
-
-    rm -f \
-        "${SERVER_PID_FILE}" \
-        "${TUNNEL_PID_FILE}"
-
-    exit "${exit_code}"
 }
 
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+check_command() {
+    command -v "$1" >/dev/null 2>&1
+}
 
+check_dependencies() {
+    local missing=()
+
+    for cmd in curl tar grep sed; do
+        if ! check_command "${cmd}"; then
+            missing+=("${cmd}")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        print_error "Missing required commands: ${missing[*]}"
+        exit 1
+    fi
+}
+
+generate_password() {
+    if check_command openssl; then
+        openssl rand -hex 32
+    elif check_command python3; then
+        python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+    else
+        print_error "Neither openssl nor python3 is available."
+        exit 1
+    fi
+}
 
 # ==========================================================
-# Find executable
+# Installation
 # ==========================================================
 
-find_executable() {
-    local name="$1"
-
-    if command -v "${name}" >/dev/null 2>&1; then
-        command -v "${name}"
+find_code_server() {
+    if check_command code-server; then
+        CODE_SERVER_BIN="$(command -v code-server)"
         return 0
     fi
 
-    if [[ -x "${LOCAL_BIN}/${name}" ]]; then
-        echo "${LOCAL_BIN}/${name}"
+    if [[ -x "${HOME}/.local/bin/code-server" ]]; then
+        CODE_SERVER_BIN="${HOME}/.local/bin/code-server"
+        return 0
+    fi
+
+    local found
+    found="$(find "${HOME}/.local/lib" \
+        -type f -path '*/bin/code-server' \
+        -executable -print -quit 2>/dev/null || true)"
+
+    if [[ -n "${found}" ]]; then
+        CODE_SERVER_BIN="${found}"
         return 0
     fi
 
     return 1
 }
 
-
-# ==========================================================
-# Install code-server
-# ==========================================================
-
 install_code_server() {
+    print_info "Checking code-server installation..."
 
-    if find_executable code-server >/dev/null 2>&1; then
+    if find_code_server; then
+        print_info "code-server is already installed."
         return 0
     fi
 
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "Error: curl is required to install code-server."
+    print_info "Installing code-server..."
+
+    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone
+
+    if ! find_code_server; then
+        print_error "code-server installation failed."
         exit 1
     fi
 
-    if ! command -v bash >/dev/null 2>&1; then
-        echo "Error: bash is required."
-        exit 1
-    fi
-
-    echo "Installing code-server..."
-
-    curl -fsSL \
-        https://code-server.dev/install.sh \
-        | sh -s -- --method=standalone
-
-    export PATH="${LOCAL_BIN}:${PATH}"
-
-    if ! find_executable code-server >/dev/null 2>&1; then
-        echo "Error: code-server installation completed but executable was not found."
-        exit 1
-    fi
+    print_info "code-server installed successfully."
 }
 
-
-# ==========================================================
-# Install cloudflared
-# ==========================================================
-
 install_cloudflared() {
+    print_info "Checking cloudflared installation..."
 
-    if find_executable cloudflared >/dev/null 2>&1; then
+    if check_command cloudflared; then
+        CLOUDFLARED_BIN="$(command -v cloudflared)"
         return 0
     fi
 
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "Error: curl is required to install cloudflared."
-        exit 1
+    if [[ -x "${CLOUDFLARED_BIN}" ]]; then
+        return 0
     fi
 
-    local arch
-    local download_url
+    print_info "Installing cloudflared..."
 
+    local arch
     arch="$(uname -m)"
 
     case "${arch}" in
-
-        x86_64|amd64)
-            download_url="${CLOUDFLARED_AMD64_URL}"
+        x86_64 | amd64)
+            arch="amd64"
             ;;
-
-        aarch64|arm64)
-            download_url="${CLOUDFLARED_ARM64_URL}"
+        aarch64 | arm64)
+            arch="arm64"
             ;;
-
         *)
-            echo "Error: Unsupported CPU architecture: ${arch}"
+            print_error "Unsupported architecture: ${arch}"
             exit 1
             ;;
-
     esac
 
-    echo "Downloading cloudflared..."
+    mkdir -p "$(dirname "${CLOUDFLARED_BIN}")"
 
     curl -fL \
-        "${download_url}" \
-        -o "${LOCAL_BIN}/cloudflared"
+        "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}" \
+        -o "${CLOUDFLARED_BIN}"
 
-    chmod +x "${LOCAL_BIN}/cloudflared"
+    chmod +x "${CLOUDFLARED_BIN}"
 
-    if ! find_executable cloudflared >/dev/null 2>&1; then
-        echo "Error: cloudflared installation failed."
-        exit 1
-    fi
+    print_info "cloudflared installed successfully."
 }
 
-
 # ==========================================================
-# Copy services directory
+# Configuration
 # ==========================================================
 
-copy_services_to_workspace() {
-
-    local script_dir
-    local source_services
-    local destination_services
-
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    source_services="${script_dir}/services"
-    destination_services="${WORKSPACE}/services"
-
-    if [[ ! -d "${source_services}" ]]; then
-        return 0
-    fi
-
-    if [[ "$(realpath -m "${source_services}")" == \
-          "$(realpath -m "${destination_services}")" ]]; then
-        return 0
-    fi
-
-    echo "Copying services to ${destination_services}..."
-
-    mkdir -p "${destination_services}"
-
-    cp -a \
-        "${source_services}/." \
-        "${destination_services}/"
-
-    echo "Services copied successfully."
+create_directories() {
+    mkdir -p "${STATE_DIR}"
+    mkdir -p "${LOG_DIR}"
+    mkdir -p "${WORKSPACE}"
 }
 
-
-# ==========================================================
-# Workspace compatibility
-# ==========================================================
-
-ensure_workspace_compatibility() {
-
-    if [[ ! -d /workspace ]] &&
-       [[ "${WORKSPACE}" != "/workspace" ]]; then
-
-        ln -s "${WORKSPACE}" /workspace 2>/dev/null || true
-    fi
-}
-
-
-# ==========================================================
-# Install VS Code extensions
-# ==========================================================
-
-run_install_extensions() {
-
-    local script_dir
-    local script_path=""
-
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    local candidates=(
-        "${WORKSPACE}/services/coder/install_extension.sh"
-        "${script_dir}/services/coder/install_extension.sh"
-        "${script_dir}/install_extension.sh"
-    )
-
-    for candidate in "${candidates[@]}"; do
-        if [[ -f "${candidate}" ]]; then
-            script_path="${candidate}"
-            break
-        fi
-    done
-
-    if [[ -z "${script_path}" ]]; then
-        echo "Warning: Extension script not found."
-        echo "Expected: services/coder/install_extension.sh"
-        return 0
-    fi
-
-    echo "Installing extensions using ${script_path}..."
-
-    if bash "${script_path}"; then
-        echo "Extensions installed successfully."
-    else
-        echo "Warning: Extension installation failed."
-    fi
-}
-
-
-# ==========================================================
-# Check code-server health
-# ==========================================================
-
-is_healthy() {
-
-    curl \
-        -fsS \
-        --max-time 2 \
-        "${HEALTH_URL}" \
-        >/dev/null 2>&1
-}
-
-
-# ==========================================================
-# Wait for code-server
-# ==========================================================
-
-wait_for_code_server() {
-
-    local timeout="${1:-30}"
-
-    for ((i=1; i<=timeout; i++)); do
-
-        if is_healthy; then
-            return 0
-        fi
-
-        if [[ -n "${SERVER_PID}" ]] &&
-           ! kill -0 "${SERVER_PID}" 2>/dev/null; then
-
-            echo "Error: code-server exited during startup."
-            return 1
-        fi
-
-        sleep 1
-    done
-
-    echo "Error: code-server did not become ready."
-    echo "Health URL: ${HEALTH_URL}"
-
-    return 1
-}
-
-
-# ==========================================================
-# Start code-server
-# ==========================================================
-
-start_code_server() {
-
-    if is_healthy; then
-        echo "Error: Something is already responding at ${HEALTH_URL}."
-        echo "Stop the existing service before starting another one."
-        exit 1
-    fi
-
-    install_code_server
-
-    ensure_workspace_compatibility
-    copy_services_to_workspace
-
-    mkdir -p "${STATE_DIR}" "${WORKSPACE}" "${LOG_DIR}"
-
+create_code_server_config() {
     local password
-    local code_server
 
-    password="$(openssl rand -hex 32 2>/dev/null || \
-        head -c 32 /dev/urandom | base64)"
+    password="$(generate_password)"
 
     cat > "${CONFIG_FILE}" <<EOF
 bind-addr: 127.0.0.1:${PORT}
@@ -415,416 +234,374 @@ EOF
 
     chmod 600 "${CONFIG_FILE}"
 
-    code_server="$(find_executable code-server)"
+    cat > "${CREDENTIAL_FILE}" <<EOF
+Code Server Login
+=================
 
-    echo "Starting code-server..."
-    echo "Port: ${PORT}"
-    echo "Workspace: ${WORKSPACE}"
+Local URL: http://127.0.0.1:${PORT}
+Username: Not required
+Password: ${password}
 
-    nohup "${code_server}" \
+Workspace: ${WORKSPACE}
+Port: ${PORT}
+
+Cloudflare Tunnel: Disabled
+EOF
+
+    chmod 600 "${CREDENTIAL_FILE}"
+
+    print_info "Login credentials saved to: ${CREDENTIAL_FILE}"
+}
+
+update_credential_file() {
+    local password
+
+    password="$(sed -n 's/^password: //p' "${CONFIG_FILE}")"
+
+    cat > "${CREDENTIAL_FILE}" <<EOF
+Code Server Login
+=================
+
+Local URL: http://127.0.0.1:${PORT}
+Username: Not required
+Password: ${password}
+
+Workspace: ${WORKSPACE}
+Port: ${PORT}
+
+Cloudflare Tunnel: ${TUNNEL_URL}
+EOF
+
+    chmod 600 "${CREDENTIAL_FILE}"
+}
+
+# ==========================================================
+# Workspace
+# ==========================================================
+
+setup_workspace() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    if [[ -d "${script_dir}/services" && ! -d "${WORKSPACE}/services" ]]; then
+        print_info "Copying services directory to workspace..."
+        cp -a "${script_dir}/services" "${WORKSPACE}/services"
+    fi
+
+    if [[ ! -e "/workspace" ]]; then
+        ln -s "${WORKSPACE}" /workspace 2>/dev/null || true
+    fi
+}
+
+# ==========================================================
+# Extensions
+# ==========================================================
+
+install_extensions() {
+    print_info "Installing recommended extensions..."
+
+    local extensions=(
+        ms-python.python
+        ms-python.vscode-pylance
+        dbaeumer.vscode-eslint
+        esbenp.prettier-vscode
+        bmewburn.vscode-intelephense-client
+        mtxr.sqltools
+        ms-azuretools.vscode-docker
+        eamodio.gitlens
+    )
+
+    for extension in "${extensions[@]}"; do
+        print_info "Installing ${extension}..."
+        "${CODE_SERVER_BIN}" \
+            --install-extension "${extension}" \
+            --force || true
+    done
+}
+
+# ==========================================================
+# Process management
+# ==========================================================
+
+is_running() {
+    local pid_file="$1"
+
+    if [[ ! -f "${pid_file}" ]]; then
+        return 1
+    fi
+
+    local pid
+    pid="$(cat "${pid_file}" 2>/dev/null || true)"
+
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+        return 0
+    fi
+
+    rm -f "${pid_file}"
+    return 1
+}
+
+stop_existing_processes() {
+    print_info "Checking existing processes..."
+
+    for pid_file in "${CODE_SERVER_PID_FILE}" "${CLOUDFLARED_PID_FILE}"; do
+        if is_running "${pid_file}"; then
+            local pid
+            pid="$(cat "${pid_file}")"
+
+            print_info "Stopping existing process: ${pid}"
+            kill "${pid}" 2>/dev/null || true
+            rm -f "${pid_file}"
+        fi
+    done
+}
+
+start_code_server() {
+    print_info "Starting code-server..."
+
+    nohup "${CODE_SERVER_BIN}" \
         --config "${CONFIG_FILE}" \
         --disable-telemetry \
         "${WORKSPACE}" \
-        > "${SERVER_LOG}" 2>&1 &
+        >> "${CODE_SERVER_LOG}" 2>&1 < /dev/null &
 
-    SERVER_PID=$!
+    local pid=$!
+    echo "${pid}" > "${CODE_SERVER_PID_FILE}"
 
-    echo "${SERVER_PID}" > "${SERVER_PID_FILE}"
+    sleep 2
 
-    if ! wait_for_code_server 30; then
-        return 1
+    if ! kill -0 "${pid}" 2>/dev/null; then
+        print_error "code-server failed to start. Check ${CODE_SERVER_LOG}"
+        exit 1
     fi
 
-    echo "code-server is running."
+    print_info "code-server started."
+    print_info "PID: ${pid}"
+    print_info "Log: ${CODE_SERVER_LOG}"
 }
 
-
 # ==========================================================
-# Read code-server password
-# ==========================================================
-
-read_code_server_password() {
-
-    if [[ ! -f "${CONFIG_FILE}" ]]; then
-        echo "Error: code-server config was not found:"
-        echo "${CONFIG_FILE}"
-        return 1
-    fi
-
-    grep -E '^password:' "${CONFIG_FILE}" \
-        | sed 's/^password:[[:space:]]*//'
-}
-
-
-# ==========================================================
-# Read Cloudflare Quick Tunnel URL
+# Cloudflare Tunnel
 # ==========================================================
 
-read_tunnel_url() {
+start_quick_tunnel() {
+    print_info "Starting Cloudflare Quick Tunnel..."
 
-    [[ -f "${TUNNEL_LOG}" ]] || return 1
+    nohup "${CLOUDFLARED_BIN}" tunnel \
+        --url "http://127.0.0.1:${PORT}" \
+        --no-autoupdate \
+        >> "${CLOUDFLARED_LOG}" 2>&1 < /dev/null &
 
-    grep -oE \
-        'https://[A-Za-z0-9-]+\.trycloudflare\.com' \
-        "${TUNNEL_LOG}" \
-        | head -n 1
-}
+    local pid=$!
+    echo "${pid}" > "${CLOUDFLARED_PID_FILE}"
 
+    print_info "Waiting for Quick Tunnel URL..."
 
-# ==========================================================
-# Wait for Quick Tunnel URL
-# ==========================================================
+    for _ in $(seq 1 30); do
+        TUNNEL_URL="$(
+            grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' \
+                "${CLOUDFLARED_LOG}" 2>/dev/null |
+                tail -n 1 || true
+        )"
 
-wait_for_tunnel_url() {
-
-    local timeout="${1:-60}"
-
-    for ((i=1; i<=timeout; i++)); do
-
-        local url
-        url="$(read_tunnel_url || true)"
-
-        if [[ -n "${url}" ]]; then
-            echo "${url}"
-            return 0
+        if [[ -n "${TUNNEL_URL}" ]]; then
+            break
         fi
 
-        if [[ -n "${TUNNEL_PID}" ]] &&
-           ! kill -0 "${TUNNEL_PID}" 2>/dev/null; then
-
-            echo "Error: cloudflared exited before publishing its URL."
-            return 1
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            print_error "cloudflared stopped unexpectedly. Check ${CLOUDFLARED_LOG}"
+            exit 1
         fi
 
         sleep 1
     done
 
-    echo "Error: Timed out waiting for Cloudflare Quick Tunnel URL."
-    return 1
+    if [[ -z "${TUNNEL_URL}" ]]; then
+        TUNNEL_URL="URL not detected. Check ${CLOUDFLARED_LOG}"
+        print_error "Could not detect Quick Tunnel URL."
+    else
+        print_info "Quick Tunnel started."
+        print_info "Public URL: ${TUNNEL_URL}"
+    fi
 }
-
-
-# ==========================================================
-# Start Cloudflare Quick Tunnel
-# ==========================================================
-
-start_quick_tunnel() {
-
-    install_cloudflared
-
-    local cloudflared
-
-    cloudflared="$(find_executable cloudflared)"
-
-    echo "Starting Cloudflare Quick Tunnel..."
-
-    nohup "${cloudflared}" tunnel \
-        --url "http://127.0.0.1:${PORT}" \
-        --no-autoupdate \
-        > "${TUNNEL_LOG}" 2>&1 &
-
-    TUNNEL_PID=$!
-
-    echo "${TUNNEL_PID}" > "${TUNNEL_PID_FILE}"
-
-    TUNNEL_URL="$(wait_for_tunnel_url 60)"
-
-    echo "Cloudflare Quick Tunnel is running."
-}
-
-
-# ==========================================================
-# Start Cloudflare Named Tunnel
-# ==========================================================
 
 start_named_tunnel() {
+    print_info "Starting Cloudflare Named Tunnel..."
 
-    install_cloudflared
-
-    local cloudflared
-
-    cloudflared="$(find_executable cloudflared)"
-
-    echo "Starting Cloudflare Named Tunnel..."
-
-    nohup "${cloudflared}" tunnel run \
+    nohup "${CLOUDFLARED_BIN}" tunnel run \
         --token "${TUNNEL_TOKEN}" \
         --no-autoupdate \
-        > "${TUNNEL_LOG}" 2>&1 &
+        >> "${CLOUDFLARED_LOG}" 2>&1 < /dev/null &
 
-    TUNNEL_PID=$!
+    local pid=$!
+    echo "${pid}" > "${CLOUDFLARED_PID_FILE}"
 
-    echo "${TUNNEL_PID}" > "${TUNNEL_PID_FILE}"
+    sleep 2
 
-    sleep 3
-
-    if ! kill -0 "${TUNNEL_PID}" 2>/dev/null; then
-        echo "Error: Cloudflare Named Tunnel exited unexpectedly."
-
-        if [[ -f "${TUNNEL_LOG}" ]]; then
-            echo ""
-            echo "Cloudflare log:"
-            tail -n 30 "${TUNNEL_LOG}"
-        fi
-
-        return 1
+    if ! kill -0 "${pid}" 2>/dev/null; then
+        print_error "Named Tunnel failed to start. Check ${CLOUDFLARED_LOG}"
+        exit 1
     fi
 
-    echo "Cloudflare Named Tunnel is running."
+    TUNNEL_URL="Named Tunnel is running. Use your configured hostname."
+
+    print_info "Named Tunnel started."
+    print_info "PID: ${pid}"
+    print_info "Log: ${CLOUDFLARED_LOG}"
 }
 
-
 # ==========================================================
-# Print connection information
+# Output
 # ==========================================================
 
 print_connection_details() {
-
-    local password
-
-    password="$(read_code_server_password)"
-
     echo ""
-    echo "======================================================"
-    echo "CODE-SERVER IS READY"
-    echo "======================================================"
+    echo "========================================"
+    echo "Services started"
+    echo "========================================"
+    echo ""
+    echo "Code Server:"
+    echo "  Local URL: http://127.0.0.1:${PORT}"
+    echo "  Workspace: ${WORKSPACE}"
+    echo "  Log: ${CODE_SERVER_LOG}"
+    echo ""
 
-    echo "Local URL:  http://127.0.0.1:${PORT}"
-    echo "Workspace:  ${WORKSPACE}"
-    echo "Password:   ${password}"
-
-    if [[ "${TUNNEL_ENABLED}" == "true" ]]; then
-
-        if [[ -n "${TUNNEL_TOKEN}" ]]; then
-
-            echo "Tunnel:     Cloudflare Named Tunnel"
-
-        else
-
-            echo "Tunnel:     Cloudflare Quick Tunnel"
-            echo "Public URL: ${TUNNEL_URL}"
-
-        fi
-
+    if [[ "${TUNNEL_ENABLED}" == true ]]; then
+        echo "Cloudflare Tunnel:"
+        echo "  URL: ${TUNNEL_URL}"
+        echo "  Log: ${CLOUDFLARED_LOG}"
+        echo ""
     else
-
-        echo "Tunnel:     Disabled"
-        echo "Public URL: None"
-
+        echo "Cloudflare Tunnel: Disabled"
+        echo ""
     fi
 
+    echo "Login credentials:"
+    echo "  File: ${CREDENTIAL_FILE}"
     echo ""
-    echo "Server log: ${SERVER_LOG}"
-
-    if [[ "${TUNNEL_ENABLED}" == "true" ]]; then
-        echo "Tunnel log: ${TUNNEL_LOG}"
-    fi
-
-    echo "======================================================"
+    echo "========================================"
 }
 
-
 # ==========================================================
-# Supervise services
+# Arguments
 # ==========================================================
 
-supervise_services() {
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --tunnel)
+                TUNNEL_ENABLED=true
+                shift
+                ;;
 
-    echo ""
-    echo "Foreground mode: press Ctrl+C to stop services."
+            --tunnel-token)
+                if [[ -z "${2:-}" ]]; then
+                    print_error "Missing token after --tunnel-token."
+                    exit 1
+                fi
 
-    while true; do
+                TUNNEL_ENABLED=true
+                TUNNEL_TOKEN="$2"
+                shift 2
+                ;;
 
-        if [[ -n "${SERVER_PID}" ]] &&
-           ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+            --port)
+                if [[ -z "${2:-}" ]]; then
+                    print_error "Missing port after --port."
+                    exit 1
+                fi
 
-            echo "code-server stopped."
-            return 1
-        fi
+                PORT="$2"
+                shift 2
+                ;;
 
-        if [[ "${TUNNEL_ENABLED}" == "true" ]] &&
-           [[ -n "${TUNNEL_PID}" ]] &&
-           ! kill -0 "${TUNNEL_PID}" 2>/dev/null; then
+            --workspace)
+                if [[ -z "${2:-}" ]]; then
+                    print_error "Missing path after --workspace."
+                    exit 1
+                fi
 
-            echo "Cloudflare Tunnel stopped."
-            return 1
-        fi
+                WORKSPACE="$2"
+                shift 2
+                ;;
 
-        sleep 2
+            --foreground)
+                FOREGROUND=true
+                shift
+                ;;
+
+            --install-extensions)
+                INSTALL_EXTENSIONS=true
+                shift
+                ;;
+
+            --help | -h)
+                show_help
+                exit 0
+                ;;
+
+            *)
+                print_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
     done
+
+    if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+        print_error "Invalid port: ${PORT}"
+        exit 1
+    fi
 }
 
-
 # ==========================================================
-# Parse arguments
-# ==========================================================
-
-while [[ $# -gt 0 ]]; do
-
-    case "$1" in
-
-        --tunnel)
-            TUNNEL_ENABLED=true
-            shift
-            ;;
-
-        --tunnel-token)
-
-            if [[ $# -lt 2 ]]; then
-                echo "Error: --tunnel-token requires a token."
-                exit 1
-            fi
-
-            TUNNEL_TOKEN="$2"
-            TUNNEL_ENABLED=true
-            shift 2
-            ;;
-
-        --port)
-
-            if [[ $# -lt 2 ]]; then
-                echo "Error: --port requires a port number."
-                exit 1
-            fi
-
-            PORT="$2"
-            HEALTH_URL="http://127.0.0.1:${PORT}/healthz"
-
-            shift 2
-            ;;
-
-        --workspace)
-
-            if [[ $# -lt 2 ]]; then
-                echo "Error: --workspace requires a path."
-                exit 1
-            fi
-
-            WORKSPACE="$(realpath -m "$2")"
-
-            LOG_DIR="${WORKSPACE}/log"
-            SERVER_LOG="${LOG_DIR}/code-server.log"
-            TUNNEL_LOG="${LOG_DIR}/cloudflared.log"
-
-            mkdir -p "${WORKSPACE}" "${LOG_DIR}"
-
-            shift 2
-            ;;
-
-        --foreground)
-            FOREGROUND=true
-            shift
-            ;;
-
-        --install-extensions|--install-extension|--extensions)
-            INSTALL_EXTENSIONS=true
-            shift
-            ;;
-
-        --help|-h)
-            usage
-            exit 0
-            ;;
-
-        *)
-            echo "Error: Unknown argument: $1"
-            echo ""
-            usage
-            exit 1
-            ;;
-
-    esac
-
-done
-
-
-# ==========================================================
-# Recreate directories after argument parsing
+# Main
 # ==========================================================
 
-mkdir -p \
-    "${LOCAL_BIN}" \
-    "${STATE_DIR}" \
-    "${WORKSPACE}" \
-    "${LOG_DIR}"
+main() {
+    parse_arguments "$@"
 
+    check_dependencies
+    create_directories
 
-# ==========================================================
-# Startup
-# ==========================================================
+    install_code_server
 
-echo ""
-echo "======================================================"
-echo "Starting services"
-echo "======================================================"
+    if [[ "${TUNNEL_ENABLED}" == true ]]; then
+        install_cloudflared
+    fi
 
-echo "Workspace: ${WORKSPACE}"
-echo "Port:      ${PORT}"
-echo "Tunnel:    ${TUNNEL_ENABLED}"
+    stop_existing_processes
 
+    create_code_server_config
+    setup_workspace
 
-# ----------------------------------------------------------
-# Workspace preparation
-# ----------------------------------------------------------
-
-ensure_workspace_compatibility
-copy_services_to_workspace
-
-
-# ----------------------------------------------------------
-# Start code-server
-# ----------------------------------------------------------
-
-if is_healthy; then
-
-    echo "code-server is already running."
-
-else
+    if [[ "${INSTALL_EXTENSIONS}" == true ]]; then
+        install_extensions
+    fi
 
     start_code_server
 
-fi
-
-
-# ----------------------------------------------------------
-# Install extensions
-# ----------------------------------------------------------
-
-if [[ "${INSTALL_EXTENSIONS}" == "true" ]]; then
-    run_install_extensions
-fi
-
-
-# ----------------------------------------------------------
-# Start Cloudflare only when explicitly requested
-# ----------------------------------------------------------
-
-if [[ "${TUNNEL_ENABLED}" == "true" ]]; then
-
-    if [[ -n "${TUNNEL_TOKEN}" ]]; then
-        start_named_tunnel
-    else
-        start_quick_tunnel
+    if [[ "${TUNNEL_ENABLED}" == true ]]; then
+        if [[ -n "${TUNNEL_TOKEN}" ]]; then
+            start_named_tunnel
+        else
+            start_quick_tunnel
+        fi
     fi
 
-else
+    update_credential_file
+    print_connection_details
 
-    echo "Cloudflare Tunnel is disabled."
+    if [[ "${FOREGROUND}" == true ]]; then
+        trap cleanup EXIT INT TERM
 
-fi
+        print_info "Running in foreground. Press Ctrl+C to stop."
 
+        local code_server_pid
+        code_server_pid="$(cat "${CODE_SERVER_PID_FILE}")"
 
-# ==========================================================
-# Print information
-# ==========================================================
+        wait "${code_server_pid}" || true
+    fi
+}
 
-print_connection_details
-
-
-# ==========================================================
-# Foreground mode
-# ==========================================================
-
-if [[ "${FOREGROUND}" == "true" ]]; then
-    supervise_services
-fi
+main "$@"
