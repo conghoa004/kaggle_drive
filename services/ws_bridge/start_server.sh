@@ -6,4 +6,4 @@ chmod +x wsb
 
 cp wsb ~/.local/bin/   # or: sudo cp wsb /usr/local/bin/
 
-./ws_bridge/wsb server -c config.server.toml
+.wsb server -c config.server.toml
