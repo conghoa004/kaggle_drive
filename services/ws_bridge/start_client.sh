@@ -1,1 +1,0 @@
-./ws_bridge/wsb client -c config.client.toml

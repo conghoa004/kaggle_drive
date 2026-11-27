@@ -2,6 +2,13 @@
 set -Eeuo pipefail
 
 REPO_URL="https://github.com/conghoa004/ws_bridge.git"
+TARGET_DIR="ws_bridge"
+
+FILES=(
+    "config.client.toml"
+    "config.server.toml"
+    "wsb.txt"
+)
 
 echo "=========================================="
 echo "       ws_bridge Repository Cloner"
@@ -29,8 +36,6 @@ case "$OS" in
         ;;
 esac
 
-TARGET_DIR="ws_bridge"
-
 echo "Operating System : $OS"
 echo "Branch           : $BRANCH"
 echo "Repository       : $REPO_URL"
@@ -39,16 +44,50 @@ echo ""
 
 # Check existing directory
 if [[ -e "$TARGET_DIR" ]]; then
-    echo "Error: Target already exists: $TARGET_DIR"
+    echo "Error: Target directory already exists: $TARGET_DIR"
     exit 1
 fi
 
 # Clone selected branch
-echo "[1/1] Cloning branch '$BRANCH'..."
+echo "[1/3] Cloning branch '$BRANCH'..."
 
 git clone -b "$BRANCH" --single-branch "$REPO_URL" "$TARGET_DIR"
 
+# Verify required files
+echo "[2/3] Checking required files..."
+
+for FILE in "${FILES[@]}"; do
+    if [[ ! -f "$TARGET_DIR/$FILE" ]]; then
+        echo "Error: Required file not found: $FILE"
+        echo "The cloned directory has been preserved: $TARGET_DIR"
+        exit 1
+    fi
+done
+
+# Copy selected files to current directory
+echo "Copying files..."
+
+for FILE in "${FILES[@]}"; do
+    cp -f -- "$TARGET_DIR/$FILE" .
+    echo "Copied: $FILE"
+done
+
+# Remove cloned directory
+echo "[3/3] Removing temporary repository directory..."
+
+rm -rf -- "$TARGET_DIR"
+
 echo ""
-echo "Clone completed successfully."
-echo "Location: $TARGET_DIR"
-echo "Branch: $BRANCH"
+echo "=========================================="
+echo "       Operation Completed Successfully"
+echo "=========================================="
+echo "Destination: $(pwd)"
+echo ""
+echo "Files copied:"
+
+for FILE in "${FILES[@]}"; do
+    echo " - $FILE"
+done
+
+echo ""
+echo "Temporary repository directory removed."
