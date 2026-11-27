@@ -12,6 +12,7 @@ CLOUDFLARED_LOCAL_BIN="${LOCAL_BIN_DIR}/cloudflared"
 CODE_SERVER_DATA_DIR="${LOCAL_SHARE_DIR}/code-server"
 CODE_SERVER_MARKER="${STATE_DIR}/code-server-install-dir"
 CLOUDFLARED_MARKER="${STATE_DIR}/cloudflared-install-path"
+CREDENTIAL_PATH_FILE="${STATE_DIR}/credentials-path"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTO_YES=false
 
@@ -122,6 +123,13 @@ main() {
     if [[ -d "$CODE_SERVER_DATA_DIR" ]]; then
         rm -rf -- "$CODE_SERVER_DATA_DIR"
         info "Removed code-server user data."
+    fi
+    if [[ -f "$CREDENTIAL_PATH_FILE" ]]; then
+        credential_path="$(cat "$CREDENTIAL_PATH_FILE" 2>/dev/null || true)"
+        if [[ "$credential_path" == /* && "${credential_path##*/}" == login.txt && -f "$credential_path" ]]; then
+            rm -f -- "$credential_path"
+            info "Removed login file: $credential_path"
+        fi
     fi
     if [[ -d "$STATE_DIR" ]]; then
         rm -rf -- "$STATE_DIR"

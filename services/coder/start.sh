@@ -9,7 +9,7 @@ LOCAL_LIB_DIR="${HOME}/.local/lib"
 CONFIG_FILE="${STATE_DIR}/config.yaml"
 CODE_SERVER_PID_FILE="${STATE_DIR}/code-server.pid"
 CLOUDFLARED_PID_FILE="${STATE_DIR}/cloudflared.pid"
-CREDENTIAL_FILE="${STATE_DIR}/login.txt"
+CREDENTIAL_FILE="${PWD}/login.txt"
 
 PORT="${CODE_SERVER_PORT:-8001}"
 WORKSPACE="${WORKSPACE_DIR:-${KAGGLE_WORKING_DIR:-/workspaces}}"
@@ -122,6 +122,8 @@ Port: ${PORT}
 Cloudflare Tunnel: ${TUNNEL_URL}
 EOF
     chmod 600 "$CREDENTIAL_FILE"
+    echo "$CREDENTIAL_FILE" > "${STATE_DIR}/credentials-path"
+    chmod 600 "${STATE_DIR}/credentials-path"
 }
 
 install_extensions() {
