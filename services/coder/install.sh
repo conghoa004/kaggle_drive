@@ -14,13 +14,27 @@ error() { printf 'Error: %s\n' "$*" >&2; }
 
 usage() {
     cat <<'EOF'
-Usage: bash install.sh [--with-cloudflared] [--help]
+Usage: bash install.sh [install options] [start options]
 
-Installs code-server for the current user. Add --with-cloudflared to enable
-Cloudflare Tunnel support in start.sh.
+Install options:
+  --with-cloudflared       Install Cloudflare Tunnel support
+  --help                   Show this help
+
+Start options:
+  --tunnel                 Install cloudflared and start a Quick Tunnel
+  --tunnel-token TOKEN     Install cloudflared and start a Named Tunnel
+  --port PORT              Set code-server port
+  --workspace PATH         Set the workspace
+  --foreground             Keep the script attached to code-server
+  --install-extensions     Install recommended extensions before starting
+
+Examples:
+  bash install.sh
+  bash install.sh --tunnel
+  bash install.sh --tunnel-token YOUR_TOKEN
+  bash install.sh --port 8080 --workspace /kaggle/working
 EOF
 }
-
 find_code_server() {
     local candidate
     if command -v code-server >/dev/null 2>&1; then
@@ -92,19 +106,56 @@ install_cloudflared() {
 }
 
 main() {
+    local script_dir
+    local -a start_args=()
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --with-cloudflared) WITH_CLOUDFLARED=true; shift ;;
-            --help|-h) usage; return 0 ;;
-            *) error "Unknown option: $1"; usage >&2; return 2 ;;
+            --with-cloudflared)
+                WITH_CLOUDFLARED=true
+                shift
+                ;;
+            --tunnel)
+                WITH_CLOUDFLARED=true
+                start_args+=("$1")
+                shift
+                ;;
+            --tunnel-token)
+                [[ -n "${2:-}" ]] || { error "--tunnel-token requires a value."; return 2; }
+                WITH_CLOUDFLARED=true
+                start_args+=("$1" "$2")
+                shift 2
+                ;;
+            --port|--workspace)
+                [[ -n "${2:-}" ]] || { error "$1 requires a value."; return 2; }
+                start_args+=("$1" "$2")
+                shift 2
+                ;;
+            --foreground|--install-extensions)
+                start_args+=("$1")
+                shift
+                ;;
+            --help|-h)
+                usage
+                return 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                usage >&2
+                return 2
+                ;;
         esac
     done
+
     [[ "$(uname -s)" == Linux ]] || { error "This installer requires Linux."; return 1; }
     mkdir -p "$STATE_DIR"
     install_code_server
-    [[ "$WITH_CLOUDFLARED" == false ]] || install_cloudflared
-    info "Installation complete."
-    info "Start with: bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/start.sh""
-    [[ "$WITH_CLOUDFLARED" == true ]] || info "For tunnels, rerun with --with-cloudflared."
+    if [[ "$WITH_CLOUDFLARED" == true ]]; then
+        install_cloudflared
+    fi
+
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    info "Installation complete; starting code-server..."
+    bash "${script_dir}/start.sh" "${start_args[@]}"
 }
 main "$@"
