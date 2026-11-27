@@ -7,7 +7,7 @@ TARGET_DIR="ws_bridge"
 FILES=(
     "config.client.toml"
     "config.server.toml"
-    "wsb.txt"
+    "wsb"
 )
 
 echo "=========================================="
